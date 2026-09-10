@@ -4,6 +4,13 @@ if [ ! -d build ]; then
     mkdir -p build;
 fi
 
+shopt -s nullglob
+cd ./code/shaders
+for ShaderFile in *.{vert,frag,comp,mesh,task}; do
+    glslangValidator --target-env vulkan1.3 -x $ShaderFile -o "${ShaderFile}.h"
+done
+cd ../..
+
 SourceFile="code/main.c"
 OutputFile="build/finite"
 
@@ -25,4 +32,8 @@ LinkFlags=" \
     -Wl,-lwayland-client"
 
 clang $CompileFlags $SourceFile $LinkFlags
+
+if [ $? -eq 0 ]; then
+    echo "$(basename $SourceFile)";
+fi
 

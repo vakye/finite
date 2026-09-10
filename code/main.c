@@ -164,13 +164,6 @@ static void HandleKeyboardKey(
     unsigned int State
 )
 {
-    if (State == WL_KEYBOARD_KEY_STATE_PRESSED)
-        printf("pressed: ");
-    else if (State == WL_KEYBOARD_KEY_STATE_RELEASED)
-        printf("released: ");
-
-    printf("key = %u\n", Key);
-
     // TODO(vak): Map key code to key with keymap
 }
 
@@ -503,10 +496,14 @@ int main(int ArgCount, char* Args[])
     VkSurfaceKHR Surface = {0};
     VK_CHECK(vkCreateWaylandSurfaceKHR(Instance, &WaylandSurfaceInfo, 0, &Surface));
 
+    // TOOD(vak): Allocate this
     VkPhysicalDevice PhysicalDevices[16] = {0};
     unsigned int PhysicalDeviceCount = ARRAY_COUNT(PhysicalDevices);
 
     VK_CHECK(vkEnumeratePhysicalDevices(Instance, &PhysicalDeviceCount, PhysicalDevices));
+
+    VkPhysicalDevice Preferred = {0};
+    VkPhysicalDevice Fallback = {0};
 
     VkPhysicalDevice PhysicalDevice = {0};
 
@@ -519,16 +516,41 @@ int main(int ArgCount, char* Args[])
             continue;
 
         if (Properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            continue;
+        {
+            if (!Fallback) Fallback = PhysicalDevices[Index];
+        }
+        else
+        {
+            if (!Preferred) Preferred = PhysicalDevices[Index];
+        }
 
-        printf("Using GPU: %s\n", Properties.deviceName);
+        printf("GPU %u: %s", Index, Properties.deviceName);
 
-        PhysicalDevice = PhysicalDevices[Index];
-        break;
+        if (Preferred == PhysicalDevices[Index])
+            printf(" (preferred)");
+        else if (Fallback == PhysicalDevices[Index])
+            printf(" (fallback)");
+
+        printf(
+            " (Vulkan %u.%u.%u)",
+            (Properties.apiVersion >> 22) & 0x7F,
+            (Properties.apiVersion >> 12) & 0x3FF,
+            (Properties.apiVersion >>  0) & 0xFFF
+        );
+
+        printf("\n");
     }
+
+    PhysicalDevice = (Preferred) ? (Preferred) : (Fallback);
+
+    if (PhysicalDevice == Preferred)
+        printf("Using preferred GPU\n");
+    else if (PhysicalDevice == Fallback)
+        printf("Using fallback GPU\n");
 
     assert(PhysicalDevice);
 
+    // TODO(vak): Allocate this
     VkQueueFamilyProperties QueueFamilies[32] = {0};
     unsigned int QueueFamilyCount = ARRAY_COUNT(QueueFamilies);
 
@@ -594,7 +616,8 @@ int main(int ArgCount, char* Args[])
     vulkan_swapchain Swapchain = {0};
     // NOTE(vak): Created later in main loop
 
-    VkSurfaceFormatKHR SurfaceFormats[64] = {0};
+    // TODO(vak): Allocate this
+    VkSurfaceFormatKHR SurfaceFormats[256] = {0};
     unsigned int SurfaceFormatCount = ARRAY_COUNT(SurfaceFormats);
 
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -625,6 +648,7 @@ int main(int ArgCount, char* Args[])
 
     assert(Swapchain.Format.format != VK_FORMAT_UNDEFINED);
 
+    // NOTE(vak): Allocate this
     VkPresentModeKHR PresentModes[16] = {0};
     unsigned int PresentModeCount = ARRAY_COUNT(PresentModes);
 
@@ -673,6 +697,172 @@ int main(int ArgCount, char* Args[])
     {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
+
+    static unsigned int VertexCode[] =
+    {
+        #include "shaders/basic.vert.h"
+    };
+
+    static unsigned int FragmentCode[] =
+    {
+        #include "shaders/basic.frag.h"
+    };
+
+    VkShaderModuleCreateInfo VertexModuleInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof(VertexCode),
+        .pCode = VertexCode,
+    };
+
+    VkShaderModule VertexModule = {0};
+    VK_CHECK(vkCreateShaderModule(Device, &VertexModuleInfo, 0, &VertexModule));
+
+    VkShaderModuleCreateInfo FragmentModuleInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof(FragmentCode),
+        .pCode = FragmentCode,
+    };
+
+    VkShaderModule FragmentModule = {0};
+    VK_CHECK(vkCreateShaderModule(Device, &FragmentModuleInfo, 0, &FragmentModule));
+
+    VkPipelineLayoutCreateInfo PipelineLayoutInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    };
+
+    VkPipelineLayout PipelineLayout = {0};
+    VK_CHECK(vkCreatePipelineLayout(Device, &PipelineLayoutInfo, 0, &PipelineLayout));
+
+    VkPipelineShaderStageCreateInfo StageInfos[] =
+    {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = VertexModule,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = FragmentModule,
+            .pName = "main",
+        },
+    };
+
+    VkPipelineVertexInputStateCreateInfo VertexInputStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+
+    VkPipelineTessellationStateCreateInfo TessellationStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+    };
+
+    VkViewport InitialViewport = {0};
+    VkRect2D InitialScissor = {0};
+
+    VkPipelineViewportStateCreateInfo ViewportStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &InitialViewport,
+        .scissorCount = 1,
+        .pScissors = &InitialScissor,
+    };
+
+    VkPipelineRasterizationStateCreateInfo RasterizationStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+
+    VkPipelineMultisampleStateCreateInfo MultisampleStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    };
+
+    VkPipelineColorBlendStateCreateInfo ColorBlendStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &(VkPipelineColorBlendAttachmentState)
+        {
+            .blendEnable = 1,
+            .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
+            .colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT |
+                VK_COLOR_COMPONENT_G_BIT |
+                VK_COLOR_COMPONENT_B_BIT |
+                VK_COLOR_COMPONENT_A_BIT,
+        },
+    };
+
+    VkDynamicState SpecifiedDynamicStates[] =
+    {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+
+    VkPipelineDynamicStateCreateInfo DynamicStateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = ARRAY_COUNT(SpecifiedDynamicStates),
+        .pDynamicStates = SpecifiedDynamicStates,
+    };
+
+    VkPipelineRenderingCreateInfo PipelineRenderingInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &Swapchain.Format.format,
+    };
+
+    VkGraphicsPipelineCreateInfo PipelineInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &PipelineRenderingInfo,
+        .stageCount = ARRAY_COUNT(StageInfos),
+        .pStages = StageInfos,
+        .pVertexInputState = &VertexInputStateInfo,
+        .pInputAssemblyState = &InputAssemblyStateInfo,
+        .pTessellationState = &TessellationStateInfo,
+        .pViewportState = &ViewportStateInfo,
+        .pRasterizationState = &RasterizationStateInfo,
+        .pMultisampleState = &MultisampleStateInfo,
+        .pDepthStencilState = &DepthStencilStateInfo,
+        .pColorBlendState = &ColorBlendStateInfo,
+        .pDynamicState = &DynamicStateInfo,
+    };
+
+    VkPipeline Pipeline = {0};
+    VK_CHECK(vkCreateGraphicsPipelines(Device, 0, 1, &PipelineInfo, 0, &Pipeline));
+
+    vkDestroyShaderModule(Device, FragmentModule, 0);
+    vkDestroyShaderModule(Device, VertexModule, 0);
 
     VkSemaphore AcquireSemaphore = {0};
     VK_CHECK(vkCreateSemaphore(Device, &SemaphoreInfo, 0, &AcquireSemaphore));
@@ -754,6 +944,25 @@ int main(int ArgCount, char* Args[])
         };
 
         vkCmdBeginRendering(CommandBuffer, &RenderingInfo);
+
+        VkViewport Viewport =
+        {
+            .x = 0.0f,
+            .y = (float)Swapchain.Height,
+            .width = (float)Swapchain.Width,
+            .height = -(float)Swapchain.Height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+
+        VkRect2D Scissor = RenderingInfo.renderArea;
+
+        vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
+        vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
+
+        vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Pipeline);
+        vkCmdDraw(CommandBuffer, 3, 1, 0, 0);
+
         vkCmdEndRendering(CommandBuffer);
 
         VkImageMemoryBarrier PresentBarrier =
@@ -821,6 +1030,8 @@ int main(int ArgCount, char* Args[])
         VK_CHECK(vkDeviceWaitIdle(Device));
     }
 
+    vkDestroyPipeline(Device, Pipeline, 0);
+    vkDestroyPipelineLayout(Device, PipelineLayout, 0);
     vkDestroySemaphore(Device, PresentSemaphore, 0);
     vkDestroySemaphore(Device, AcquireSemaphore, 0);
     vkDestroyCommandPool(Device, CommandPool, 0);
