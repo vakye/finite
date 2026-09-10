@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/mman.h>
+#include <linux/input-event-codes.h>
 #include <wayland-client.h>
 #include "xdg-shell-client.h"
 #include "xdg-shell.c"
@@ -22,11 +24,20 @@ typedef struct
     struct wl_surface*      Surface;
     struct xdg_surface*     XdgSurface;
     struct xdg_toplevel*    XdgTopLevel;
+    struct wl_seat*         Seat;
+    struct wl_pointer*      Pointer;
+    struct wl_keyboard*     Keyboard;
 
     int                     IsResizing;
     int                     ReadyToResize;
     int                     HasClosed;
     int                     Width, Height;
+
+    unsigned int            LastMotionTime;
+    double                  CursorX, CursorY;
+
+    unsigned int            LastButtonTime[3];
+    unsigned int            ButtonsPressed[3];          // NOTE(vak): Mouse buttons = {Left, Right, Middle}
 } wayland_state;
 
 static wayland_state Wayland = {0};
@@ -39,6 +50,185 @@ static void HandleXdgWmBasePing(void* Data, struct xdg_wm_base* XdgWmBase, unsig
 static struct xdg_wm_base_listener XdgWmBaseListener =
 {
     .ping = HandleXdgWmBasePing,
+};
+
+static void HandlePointerEnter(
+    void* Data,
+    struct wl_pointer* Pointer,
+    unsigned int Serial,
+    struct wl_surface* Surface,
+    wl_fixed_t X,
+    wl_fixed_t Y
+)
+{
+}
+
+static void HandlePointerLeave(
+    void* Data,
+    struct wl_pointer* Pointer,
+    unsigned int Serial,
+    struct wl_surface* Surface
+)
+{
+}
+
+static void HandlePointerMotion(
+    void* Data,
+    struct wl_pointer* Pointer,
+    unsigned int Time,
+    wl_fixed_t X,
+    wl_fixed_t Y
+)
+{
+    if (Time > Wayland.LastMotionTime)
+    {
+        Wayland.CursorX = wl_fixed_to_double(X);
+        Wayland.CursorY = wl_fixed_to_double(Y);
+        Wayland.LastMotionTime = Time;
+    }
+}
+
+static void HandlePointerButton(
+    void* Data,
+    struct wl_pointer* Pointer,
+    unsigned int Serial,
+    unsigned int Time,
+    unsigned int Button,
+    unsigned int State
+)
+{
+    unsigned int Pressed = (State == WL_POINTER_BUTTON_STATE_PRESSED);
+    unsigned int Index = 0;
+
+    if (Button == BTN_LEFT) Index = 0;
+    else if (Button == BTN_RIGHT) Index = 1;
+    else if (Button == BTN_MIDDLE) Index = 2;
+    else Index = 0xFFFFFFFF;
+
+    if (Index != 0xFFFFFFFF)
+    {
+        if (Time > Wayland.LastButtonTime[Index])
+        {
+            Wayland.LastButtonTime[Index] = Time;
+            Wayland.ButtonsPressed[Index] = Pressed;
+        }
+    }
+}
+
+static struct wl_pointer_listener PointerListener =
+{
+    .enter = HandlePointerEnter,
+    .leave = HandlePointerLeave,
+    .motion = HandlePointerMotion,
+    .button = HandlePointerButton,
+};
+
+static void HandleKeyboardKeymap(
+    void* Data,
+    struct wl_keyboard* Keyboard,
+    unsigned int Format,
+    int FileDescriptor,
+    unsigned int Size
+)
+{
+    assert(Format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1);
+
+    // TODO(vak): Setup keymap
+}
+
+static void HandleKeyboardEnter(
+    void* Data,
+    struct wl_keyboard* Keyboard,
+    unsigned int Serial,
+    struct wl_surface* Surface,
+    struct wl_array* Keys
+)
+{
+}
+
+static void HandleKeyboardLeave(
+    void* Data,
+    struct wl_keyboard* Keyboard,
+    unsigned int Serial,
+    struct wl_surface* Surface
+)
+{
+}
+
+static void HandleKeyboardKey(
+    void* Data,
+    struct wl_keyboard* Keyboard,
+    unsigned int Serial,
+    unsigned int Time,
+    unsigned int Key,
+    unsigned int State
+)
+{
+    if (State == WL_KEYBOARD_KEY_STATE_PRESSED)
+        printf("pressed: ");
+    else if (State == WL_KEYBOARD_KEY_STATE_RELEASED)
+        printf("released: ");
+
+    printf("key = %u\n", Key);
+
+    // TODO(vak): Map key code to key with keymap
+}
+
+static void HandleKeyboardModifiers(
+    void* Data,
+    struct wl_keyboard* Keyboard,
+    unsigned int Serial,
+    unsigned int ModifiersDepressed,
+    unsigned int ModifiersLatched,
+    unsigned int ModifiersLocked,
+    unsigned int Group
+)
+{
+    // TODO(vak): Handle modifiers
+}
+
+static struct wl_keyboard_listener KeyboardListener =
+{
+    .keymap = HandleKeyboardKeymap,
+    .enter = HandleKeyboardEnter,
+    .leave = HandleKeyboardLeave,
+    .key = HandleKeyboardKey,
+    .modifiers = HandleKeyboardModifiers,
+};
+
+static void HandleSeatCapabilities(void* Data, struct wl_seat* Seat, unsigned int Capabilities)
+{
+    printf("seat capabilities: ");
+
+    if (Capabilities & WL_SEAT_CAPABILITY_POINTER)
+    {
+        Wayland.Pointer = wl_seat_get_pointer(Seat);
+        assert(Wayland.Pointer);
+
+        wl_pointer_add_listener(Wayland.Pointer, &PointerListener, 0);
+
+        printf("pointer ");
+    }
+
+    if (Capabilities & WL_SEAT_CAPABILITY_KEYBOARD)
+    {
+        Wayland.Keyboard = wl_seat_get_keyboard(Seat);
+        assert(Wayland.Keyboard);
+
+        wl_keyboard_add_listener(Wayland.Keyboard, &KeyboardListener, 0);
+
+        printf("keyboard ");
+    }
+
+    if (Capabilities & WL_SEAT_CAPABILITY_TOUCH)
+        printf("touch ");
+
+    printf("\n");
+}
+
+static struct wl_seat_listener SeatListener =
+{
+    .capabilities = HandleSeatCapabilities,
 };
 
 static void HandleRegistryGlobal(
@@ -60,6 +250,13 @@ static void HandleRegistryGlobal(
         assert(Wayland.XdgWmBase);
 
         xdg_wm_base_add_listener(Wayland.XdgWmBase, &XdgWmBaseListener, 0);
+    }
+    else if (strcmp(Interface, wl_seat_interface.name) == 0)
+    {
+        Wayland.Seat = wl_registry_bind(Registry, Name, &wl_seat_interface, 1);
+        assert(Wayland.Seat);
+
+        wl_seat_add_listener(Wayland.Seat, &SeatListener, 0);
     }
 }
 
@@ -96,8 +293,6 @@ static void HandleXdgTopLevelConfigure(
         Wayland.Width = Width;
         Wayland.Height = Height;
         Wayland.IsResizing = 1;
-
-        printf("Wayland resize: Width = %i, Height = %i\n", Width, Height);
     }
 }
 
@@ -236,6 +431,8 @@ static void VulkanResizeSwapchain(
 
 int main(int ArgCount, char* Args[])
 {
+    setvbuf(stdout, 0, _IONBF, 0);
+
     Wayland.Display = wl_display_connect(0);
     assert(Wayland.Display);
 
@@ -411,9 +608,16 @@ int main(int ArgCount, char* Args[])
     {
         VkSurfaceFormatKHR SurfaceFormat = SurfaceFormats[Index];
 
-        if ((SurfaceFormat.format == VK_FORMAT_R8G8B8A8_UNORM) ||
-            (SurfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM))
+        if (SurfaceFormat.format == VK_FORMAT_R8G8B8A8_UNORM)
         {
+            printf("Swapchain format: R8G8B8A8_UNORM\n");
+            Swapchain.Format = SurfaceFormat;
+            break;
+        }
+
+        if (SurfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
+        {
+            printf("Swapchain format: B8G8R8A8_UNORM\n");
             Swapchain.Format = SurfaceFormat;
             break;
         }
@@ -436,6 +640,13 @@ int main(int ArgCount, char* Args[])
             break;
         }
     }
+
+    if (Swapchain.PresentMode == VK_PRESENT_MODE_FIFO_KHR)
+        printf("Swapchain present mode: FIFO\n");
+    else if (Swapchain.PresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+        printf("Swapchain present mode: Mailbox\n");
+    else
+        printf("Swapchain present mode: Unknown\n");
 
     VkCommandPoolCreateInfo CommandPoolInfo =
     {
@@ -470,7 +681,6 @@ int main(int ArgCount, char* Args[])
     VK_CHECK(vkCreateSemaphore(Device, &SemaphoreInfo, 0, &PresentSemaphore));
 
     printf("Vulkan setup good\n");
-    fflush(stdout);
 
     unsigned int ImageIndex = 0;
 
@@ -607,7 +817,7 @@ int main(int ArgCount, char* Args[])
 
         Wayland.IsResizing = 0;
         Wayland.ReadyToResize = 0;
-        fflush(stdout);
+
         VK_CHECK(vkDeviceWaitIdle(Device));
     }
 
