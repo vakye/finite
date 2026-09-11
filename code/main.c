@@ -4,9 +4,11 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "update.c"
 #include "render.c"
 
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include <linux/input-event-codes.h>
 #include <wayland-client.h>
@@ -20,6 +22,8 @@
 
 #include "volk.h"
 #include "volk.c"
+
+static input Input = {0};
 
 typedef struct
 {
@@ -43,13 +47,8 @@ typedef struct
     int                     IsResizing;
     int                     ReadyToResize;
     int                     HasClosed;
-    int                     Width, Height;
 
-    unsigned int            LastMotionTime;
-    double                  CursorX, CursorY;
-
-    unsigned int            LastButtonTime[3];
-    unsigned int            ButtonsPressed[3];          // NOTE(vak): Mouse buttons = {Left, Right, Middle}
+    unsigned int            LastMouseMoveTime;
 } wayland_state;
 
 static wayland_state Wayland = {0};
@@ -92,11 +91,12 @@ static void HandlePointerMotion(
     wl_fixed_t Y
 )
 {
-    if (Time > Wayland.LastMotionTime)
+    if (Time > Wayland.LastMouseMoveTime)
     {
-        Wayland.CursorX = wl_fixed_to_double(X);
-        Wayland.CursorY = wl_fixed_to_double(Y);
-        Wayland.LastMotionTime = Time;
+        Input.MouseX = (float)wl_fixed_to_double(X);
+        Input.MouseY = (float)Input.WindowSizeY - (float)wl_fixed_to_double(Y);
+
+        Wayland.LastMouseMoveTime = Time;
     }
 }
 
@@ -109,22 +109,6 @@ static void HandlePointerButton(
     unsigned int State
 )
 {
-    unsigned int Pressed = (State == WL_POINTER_BUTTON_STATE_PRESSED);
-    unsigned int Index = 0;
-
-    if (Button == BTN_LEFT) Index = 0;
-    else if (Button == BTN_RIGHT) Index = 1;
-    else if (Button == BTN_MIDDLE) Index = 2;
-    else Index = 0xFFFFFFFF;
-
-    if (Index != 0xFFFFFFFF)
-    {
-        if (Time > Wayland.LastButtonTime[Index])
-        {
-            Wayland.LastButtonTime[Index] = Time;
-            Wayland.ButtonsPressed[Index] = Pressed;
-        }
-    }
 }
 
 static struct wl_pointer_listener PointerListener =
@@ -194,14 +178,25 @@ static void HandleKeyboardKey(
     unsigned int XkbScancode = EvdevScancode + 8;
     xkb_keysym_t Key = xkb_state_key_get_one_sym(Wayland.XkbState, XkbScancode);
 
-    if ((Pressed) && (Key == XKB_KEY_F11))
+    switch (Key)
     {
-        if (!Wayland.IsFullscreen)
-            xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
-        else
-            xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
+        case XKB_KEY_F11:
+        {
+            if (!Pressed)
+                break;
 
-        Wayland.IsFullscreen = !Wayland.IsFullscreen;
+            if (!Wayland.IsFullscreen)
+                xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
+            else
+                xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
+
+            Wayland.IsFullscreen = !Wayland.IsFullscreen;
+        } break;
+
+        case XKB_KEY_w: case XKB_KEY_Up:        Input.MovePlayerUp      = Pressed; break;
+        case XKB_KEY_a: case XKB_KEY_Left:      Input.MovePlayerLeft    = Pressed; break;
+        case XKB_KEY_s: case XKB_KEY_Down:      Input.MovePlayerDown    = Pressed; break;
+        case XKB_KEY_d: case XKB_KEY_Right:     Input.MovePlayerRight   = Pressed; break;
     }
 }
 
@@ -324,10 +319,10 @@ static void HandleXdgTopLevelConfigure(
     struct wl_array* States
 )
 {
-    if ((Width != Wayland.Width) || (Height != Wayland.Height))
+    if ((Width != Input.WindowSizeX) || (Height != Input.WindowSizeY))
     {
-        Wayland.Width = Width;
-        Wayland.Height = Height;
+        Input.WindowSizeX = Width;
+        Input.WindowSizeY = Height;
         Wayland.IsResizing = 1;
     }
 }
@@ -410,8 +405,8 @@ static void VulkanResizeSwapchain(
 
     int DesiredImageCount = (SurfaceCaps.minImageCount <= 3) ? (3) : (SurfaceCaps.minImageCount);
 
-    Swapchain->Width = Wayland.Width;
-    Swapchain->Height = Wayland.Height;
+    Swapchain->Width = Input.WindowSizeX;
+    Swapchain->Height = Input.WindowSizeY;
 
     VkSwapchainCreateInfoKHR SwapchainInfo =
     {
@@ -420,7 +415,7 @@ static void VulkanResizeSwapchain(
         .minImageCount = DesiredImageCount,
         .imageFormat = Swapchain->Format.format,
         .imageColorSpace = Swapchain->Format.colorSpace,
-        .imageExtent = {Wayland.Width, Wayland.Height},
+        .imageExtent = {Swapchain->Width, Swapchain->Height},
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -1080,13 +1075,20 @@ int main(int ArgCount, char* Args[])
 
     printf("Vulkan setup good\n");
 
-    render_batch RenderBatch = {0};
-    RenderBatch.MaxRectCount = (unsigned int)(VertexBuffer.Size / (6*sizeof(vulkan_vertex)));
-    RenderBatch.Rects = mmap(0, RenderBatch.MaxRectCount * sizeof(render_rect), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    render_spec RenderSpec = {0};
+    RenderSpec.MaxRectCount = (unsigned int)(VertexBuffer.Size / (6*sizeof(vulkan_vertex)));
+    RenderSpec.Rects = mmap(0, RenderSpec.MaxRectCount * sizeof(render_rect), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
-    assert(RenderBatch.Rects);
+    assert(RenderSpec.Rects);
 
+    world World = {0};
+    SetupWorld(&World);
+
+    Input.DeltaTime = 1.0f / 60.0f;
     unsigned int ImageIndex = 0;
+
+    struct timespec FrameBegin = {0};
+    clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
 
     while (!Wayland.HasClosed)
     {
@@ -1095,24 +1097,15 @@ int main(int ArgCount, char* Args[])
         if (Wayland.ReadyToResize)
             VulkanResizeSwapchain(Device, PhysicalDevice, Surface, &Swapchain);
 
-        RenderBatch.RenderSizeX = Swapchain.Width;
-        RenderBatch.RenderSizeY = Swapchain.Height;
+        render_batch RenderBatch = {0};
 
-        memset(RenderBatch.Projection, 0, sizeof(RenderBatch.Projection));
-
-        RenderBatch.Projection[0]  = 1.0f;
-        RenderBatch.Projection[5]  = 1.0f;
-        RenderBatch.Projection[10] = 1.0f;
-        RenderBatch.Projection[15] = 1.0f;
-
-        RenderBatch.RectCount = 0;
-
-        Render(&RenderBatch);
+        UpdateWorld(&Input, &World);
+        RenderWorld(&World, &RenderSpec, &RenderBatch);
 
         unsigned int VertexCount = 0;
         for (unsigned int RectIndex = 0; RectIndex < RenderBatch.RectCount; RectIndex++)
         {
-            render_rect* Rect = RenderBatch.Rects + RectIndex;
+            render_rect* Rect = RenderSpec.Rects + RectIndex;
 
             vulkan_vertex* V = (vulkan_vertex*)VertexBuffer.Mapping + VertexCount;
 
@@ -1314,6 +1307,15 @@ int main(int ArgCount, char* Args[])
         Wayland.ReadyToResize = 0;
 
         VK_CHECK(vkDeviceWaitIdle(Device));
+
+        struct timespec Now = {0};
+        clock_gettime(CLOCK_MONOTONIC, &Now);
+
+        Input.DeltaTime =
+            (double)(Now.tv_sec - FrameBegin.tv_sec) +
+            (double)(Now.tv_nsec - FrameBegin.tv_nsec) * 1e-9;
+
+        clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
     }
 
     vkDestroySemaphore(Device, PresentSemaphore, 0);

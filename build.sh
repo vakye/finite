@@ -17,7 +17,7 @@ OutputFile="build/finite"
 CompileFlags=" \
     -g \
     -O0 \
-    -std=c11 \
+    -std=gnu11 \
     -ffreestanding \
     -fpie \
     -fno-stack-protector \

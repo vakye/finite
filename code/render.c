@@ -8,21 +8,18 @@ typedef struct
 
 typedef struct
 {
-    // NOTE(vak): Platform sets these for Render()
-
-    unsigned int    RenderSizeX;        // NOTE(vak): Render target width
-    unsigned int    RenderSizeY;        // NOTE(vak): Render target height
     unsigned int    MaxRectCount;
+    render_rect*    Rects;
+} render_spec;
 
-    // NOTE(vak): Render() function sets these for
-    // the platform
-
-    float           Projection[16];     // NOTE(vak): Reset to identity matrix before Render() by platform
-    unsigned int    RectCount;          // NOTE(vak): Reset to 0 before Render() by platform
-    render_rect*    Rects;              // NOTE(vak): Allocated by platform
+typedef struct
+{
+    float           Projection[16];
+    unsigned int    RectCount;
 } render_batch;
 
-static void Orthographic2D(
+static void PushOrthographic2D(
+    render_spec* Spec,
     render_batch* Batch,
     float ViewMinX, float ViewMinY,
     float ViewMaxX, float ViewMaxY
@@ -46,21 +43,21 @@ static void Orthographic2D(
 }
 
 static void PushRect(
+    render_spec* Spec,
     render_batch* Batch,
-    float MinX, float MinY,
-    float MaxX, float MaxY,
+    float CenterX, float CenterY,
+    float SizeX, float SizeY,
     float R, float G, float B, float A
 )
 {
-    assert(Batch->RectCount < Batch->MaxRectCount);
+    assert(Batch->RectCount < Spec->MaxRectCount);
 
-    render_rect* Rect = Batch->Rects + Batch->RectCount++;
+    render_rect* Rect = Spec->Rects + Batch->RectCount++;
 
-    Rect->MinX = MinX;
-    Rect->MinY = MinY;
-
-    Rect->MaxX = MaxX;
-    Rect->MaxY = MaxY;
+    Rect->MinX = CenterX - 0.5f*SizeX;
+    Rect->MinY = CenterY - 0.5f*SizeY;
+    Rect->MaxX = CenterX + 0.5f*SizeX;
+    Rect->MaxY = CenterY + 0.5f*SizeY;
 
     Rect->R = R;
     Rect->G = G;
@@ -68,28 +65,41 @@ static void PushRect(
     Rect->A = A;
 }
 
-static void Render(render_batch* Batch)
+static void RenderWorld(
+    world*          World,  // NOTE(vak): Input
+    render_spec*    Spec,   // NOTE(vak): Input
+    render_batch*   Batch   // NOTE(vak): Output
+)
 {
-    float AspectRatio = (float)Batch->RenderSizeX / (float)Batch->RenderSizeY;
-    float FocalLength = 0.05f;
+    memset(Batch, 0, sizeof(render_batch));
 
-    float ViewSizeY = 1.0f / FocalLength;
-    float ViewSizeX = AspectRatio * ViewSizeY;
-    float ViewCenterX = 0.0f;
-    float ViewCenterY = 0.0f;
+    {
+        camera* Camera = &World->Camera;
 
-    float ViewMinX = ViewCenterX - 0.5f*ViewSizeX;
-    float ViewMinY = ViewCenterY - 0.5f*ViewSizeY;
-    float ViewMaxX = ViewCenterX + 0.5f*ViewSizeX;
-    float ViewMaxY = ViewCenterY + 0.5f*ViewSizeY;
+        float ViewSizeX = GetCameraViewSizeX(Camera);
+        float ViewSizeY = GetCameraViewSizeY(Camera);
 
-    Orthographic2D(Batch, ViewMinX, ViewMinY, ViewMaxX, ViewMaxY);
+        float ViewMinX = Camera->ViewCenterX - 0.5f * ViewSizeX;
+        float ViewMinY = Camera->ViewCenterY - 0.5f * ViewSizeY;
+        float ViewMaxX = Camera->ViewCenterX + 0.5f * ViewSizeX;
+        float ViewMaxY = Camera->ViewCenterY + 0.5f * ViewSizeY;
 
-    PushRect(
-        Batch,
-        -1.0f, -1.0f,
-        +1.0f, +1.0f,
-        1.0f, 0.8f, 0.5f, 1.0f
-    );
+        PushOrthographic2D(
+            Spec, Batch,
+            ViewMinX, ViewMinY,
+            ViewMaxX, ViewMaxY
+        );
+    }
+
+    {
+        player* Player = &World->Player;
+
+        PushRect(
+            Spec, Batch,
+            Player->X, Player->Y,
+            Player->SizeX, Player->SizeY,
+            1.0f, 0.8f, 0.5f, 1.0f
+        );
+    }
 }
 
