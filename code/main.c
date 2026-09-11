@@ -2,9 +2,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
+
+#include "render.c"
+
 #include <sys/mman.h>
+#include <unistd.h>
 #include <linux/input-event-codes.h>
 #include <wayland-client.h>
+#include <xkbcommon/xkbcommon.h>
 #include "xdg-shell-client.h"
 #include "xdg-shell.c"
 
@@ -27,7 +33,13 @@ typedef struct
     struct wl_seat*         Seat;
     struct wl_pointer*      Pointer;
     struct wl_keyboard*     Keyboard;
+    struct wl_output*       Output;
 
+    struct xkb_context*     XkbContext;
+    struct xkb_keymap*      XkbKeymap;
+    struct xkb_state*       XkbState;
+
+    int                     IsFullscreen;
     int                     IsResizing;
     int                     ReadyToResize;
     int                     HasClosed;
@@ -133,7 +145,20 @@ static void HandleKeyboardKeymap(
 {
     assert(Format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1);
 
-    // TODO(vak): Setup keymap
+    char* Keymap = mmap(0, Size, PROT_READ, MAP_PRIVATE, FileDescriptor, 0);
+    assert(Keymap != MAP_FAILED);
+
+    Wayland.XkbContext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    assert(Wayland.XkbContext);
+
+    Wayland.XkbKeymap = xkb_keymap_new_from_string(Wayland.XkbContext, Keymap, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    assert(Wayland.XkbKeymap);
+
+    Wayland.XkbState = xkb_state_new(Wayland.XkbKeymap);
+    assert(Wayland.XkbState);
+
+    munmap(Keymap, Size);
+    close(FileDescriptor);
 }
 
 static void HandleKeyboardEnter(
@@ -160,11 +185,24 @@ static void HandleKeyboardKey(
     struct wl_keyboard* Keyboard,
     unsigned int Serial,
     unsigned int Time,
-    unsigned int Key,
+    unsigned int EvdevScancode,
     unsigned int State
 )
 {
-    // TODO(vak): Map key code to key with keymap
+    int Pressed = (State == WL_KEYBOARD_KEY_STATE_PRESSED);
+
+    unsigned int XkbScancode = EvdevScancode + 8;
+    xkb_keysym_t Key = xkb_state_key_get_one_sym(Wayland.XkbState, XkbScancode);
+
+    if ((Pressed) && (Key == XKB_KEY_F11))
+    {
+        if (!Wayland.IsFullscreen)
+            xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
+        else
+            xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
+
+        Wayland.IsFullscreen = !Wayland.IsFullscreen;
+    }
 }
 
 static void HandleKeyboardModifiers(
@@ -250,6 +288,11 @@ static void HandleRegistryGlobal(
         assert(Wayland.Seat);
 
         wl_seat_add_listener(Wayland.Seat, &SeatListener, 0);
+    }
+    else if (strcmp(Interface, wl_output_interface.name) == 0)
+    {
+        Wayland.Output = wl_registry_bind(Registry, Name, &wl_output_interface, 1);
+        assert(Wayland.Output);
     }
 }
 
@@ -422,6 +465,112 @@ static void VulkanResizeSwapchain(
     VK_CHECK(vkDeviceWaitIdle(Device));
 }
 
+static unsigned int VulkanSelectMemoryType(
+    VkPhysicalDevice PhysicalDevice,
+    VkMemoryPropertyFlags DesiredPropertyFlags,
+    unsigned int MemoryTypeBits
+)
+{
+    VkPhysicalDeviceMemoryProperties MemoryProperties = {0};
+    vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemoryProperties);
+
+    unsigned int Result = ~0u;
+
+    for (unsigned int Index = 0; Index < MemoryProperties.memoryTypeCount; Index++)
+    {
+        VkMemoryType* MemoryType = MemoryProperties.memoryTypes + Index;
+
+        if ((MemoryTypeBits & (1 << Index)) == 0)
+            continue;
+
+        if ((MemoryType->propertyFlags & DesiredPropertyFlags) != DesiredPropertyFlags)
+            continue;
+
+        Result = Index;
+        break;
+    }
+
+    return (Result);
+}
+
+typedef struct
+{
+    VkBuffer        Buffer;
+    VkDeviceMemory  Memory;
+    size_t          Size;
+    void*           Mapping;
+} vulkan_buffer;
+
+static void VulkanMakeBuffer(
+    VkDevice Device,
+    VkPhysicalDevice PhysicalDevice,
+    size_t Size,
+    VkBufferUsageFlags UsageFlags,
+    VkMemoryPropertyFlags MemoryPropertyFlags,
+    int Mapped,
+    vulkan_buffer* Buffer
+)
+{
+    Buffer->Size = Size;
+
+    VkBufferCreateInfo BufferInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = Size,
+        .usage = UsageFlags,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    VK_CHECK(vkCreateBuffer(Device, &BufferInfo, 0, &Buffer->Buffer));
+
+    VkMemoryRequirements MemoryRequirements = {0};
+    vkGetBufferMemoryRequirements(Device, Buffer->Buffer, &MemoryRequirements);
+
+    unsigned int MemoryTypeIndex = VulkanSelectMemoryType(
+        PhysicalDevice,
+        MemoryPropertyFlags,
+        MemoryRequirements.memoryTypeBits
+    );
+
+    assert(MemoryTypeIndex != ~0u);
+
+    VkMemoryAllocateInfo AllocateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = MemoryRequirements.size,
+        .memoryTypeIndex = MemoryTypeIndex,
+    };
+
+    VK_CHECK(vkAllocateMemory(Device, &AllocateInfo, 0, &Buffer->Memory));
+    VK_CHECK(vkBindBufferMemory(Device, Buffer->Buffer, Buffer->Memory, 0));
+
+    if (Mapped)
+    {
+        VK_CHECK(vkMapMemory(Device, Buffer->Memory, 0, Buffer->Size, 0, &Buffer->Mapping));
+    }
+}
+
+static void VulkanDestroyBuffer(VkDevice Device, vulkan_buffer* Buffer)
+{
+    if (Buffer->Mapping)
+        vkUnmapMemory(Device, Buffer->Memory);
+
+    vkFreeMemory(Device, Buffer->Memory, 0);
+    vkDestroyBuffer(Device, Buffer->Buffer, 0);
+}
+
+typedef struct
+{
+    float X, Y;
+    float U, V;
+    float R, G, B, A;
+} vulkan_vertex;
+
+typedef struct
+{
+    float Projection[16];
+} vulkan_push_constants;
+
 int main(int ArgCount, char* Args[])
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -465,6 +614,11 @@ int main(int ArgCount, char* Args[])
         "VK_KHR_wayland_surface",
     };
 
+    const char* InstanceLayers[] =
+    {
+        "VK_LAYER_KHRONOS_validation",
+    };
+
     VkInstanceCreateInfo InstanceInfo =
     {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -475,10 +629,12 @@ int main(int ArgCount, char* Args[])
             .applicationVersion = VK_MAKE_VERSION(0, 0, 1),
             .pEngineName = "Finite",
             .engineVersion = VK_MAKE_VERSION(0, 0, 1),
-            .apiVersion = VK_API_VERSION_1_3,
+            .apiVersion = VK_API_VERSION_1_4,
         },
         .ppEnabledExtensionNames = InstanceExtensions,
         .enabledExtensionCount = ARRAY_COUNT(InstanceExtensions),
+        .ppEnabledLayerNames = InstanceLayers,
+        .enabledLayerCount = ARRAY_COUNT(InstanceLayers),
     };
 
     VkInstance Instance = {0};
@@ -497,7 +653,7 @@ int main(int ArgCount, char* Args[])
     VK_CHECK(vkCreateWaylandSurfaceKHR(Instance, &WaylandSurfaceInfo, 0, &Surface));
 
     // TOOD(vak): Allocate this
-    VkPhysicalDevice PhysicalDevices[16] = {0};
+    static VkPhysicalDevice PhysicalDevices[16] = {0};
     unsigned int PhysicalDeviceCount = ARRAY_COUNT(PhysicalDevices);
 
     VK_CHECK(vkEnumeratePhysicalDevices(Instance, &PhysicalDeviceCount, PhysicalDevices));
@@ -512,7 +668,7 @@ int main(int ArgCount, char* Args[])
         VkPhysicalDeviceProperties Properties = {0};
         vkGetPhysicalDeviceProperties(PhysicalDevices[Index], &Properties);
 
-        if (Properties.apiVersion < VK_API_VERSION_1_3)
+        if (Properties.apiVersion < VK_API_VERSION_1_4)
             continue;
 
         if (Properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
@@ -551,7 +707,7 @@ int main(int ArgCount, char* Args[])
     assert(PhysicalDevice);
 
     // TODO(vak): Allocate this
-    VkQueueFamilyProperties QueueFamilies[32] = {0};
+    static VkQueueFamilyProperties QueueFamilies[32] = {0};
     unsigned int QueueFamilyCount = ARRAY_COUNT(QueueFamilies);
 
     vkGetPhysicalDeviceQueueFamilyProperties(
@@ -560,7 +716,7 @@ int main(int ArgCount, char* Args[])
         QueueFamilies
     );
 
-    unsigned int QueueFamilyIndex = 0xFFFFFFFF;
+    unsigned int QueueFamilyIndex = ~0u;
 
     for (unsigned int Index = 0; Index < QueueFamilyCount; Index++)
     {
@@ -578,16 +734,23 @@ int main(int ArgCount, char* Args[])
         }
     }
 
-    assert(QueueFamilyIndex != 0xFFFFFFFF);
+    assert(QueueFamilyIndex != ~0u);
 
     const char* DeviceExtensions[] =
     {
         "VK_KHR_swapchain",
     };
 
+    VkPhysicalDeviceVulkan14Features Vulkan14Features =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+        .pushDescriptor = 1,
+    };
+
     VkPhysicalDeviceVulkan13Features Vulkan13Features =
     {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &Vulkan14Features,
         .dynamicRendering = 1,
     };
 
@@ -617,7 +780,7 @@ int main(int ArgCount, char* Args[])
     // NOTE(vak): Created later in main loop
 
     // TODO(vak): Allocate this
-    VkSurfaceFormatKHR SurfaceFormats[256] = {0};
+    static VkSurfaceFormatKHR SurfaceFormats[256] = {0};
     unsigned int SurfaceFormatCount = ARRAY_COUNT(SurfaceFormats);
 
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -649,7 +812,7 @@ int main(int ArgCount, char* Args[])
     assert(Swapchain.Format.format != VK_FORMAT_UNDEFINED);
 
     // NOTE(vak): Allocate this
-    VkPresentModeKHR PresentModes[16] = {0};
+    static VkPresentModeKHR PresentModes[16] = {0};
     unsigned int PresentModeCount = ARRAY_COUNT(PresentModes);
 
     Swapchain.PresentMode = VK_PRESENT_MODE_FIFO_KHR;
@@ -693,11 +856,6 @@ int main(int ArgCount, char* Args[])
     VkCommandBuffer CommandBuffer = {0};
     VK_CHECK(vkAllocateCommandBuffers(Device, &CommandBufferInfo, &CommandBuffer));
 
-    VkSemaphoreCreateInfo SemaphoreInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-    };
-
     static unsigned int VertexCode[] =
     {
         #include "shaders/basic.vert.h"
@@ -728,9 +886,39 @@ int main(int ArgCount, char* Args[])
     VkShaderModule FragmentModule = {0};
     VK_CHECK(vkCreateShaderModule(Device, &FragmentModuleInfo, 0, &FragmentModule));
 
+    VkDescriptorSetLayoutBinding SetBindings[] =
+    {
+        {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        },
+    };
+
+    VkDescriptorSetLayoutCreateInfo SetLayoutInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT,
+        .bindingCount = ARRAY_COUNT(SetBindings),
+        .pBindings = SetBindings,
+    };
+
+    VkDescriptorSetLayout SetLayout = {0};
+    VK_CHECK(vkCreateDescriptorSetLayout(Device, &SetLayoutInfo, 0, &SetLayout));
+
     VkPipelineLayoutCreateInfo PipelineLayoutInfo =
     {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &SetLayout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &(VkPushConstantRange)
+        {
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .offset = 0,
+            .size = sizeof(vulkan_push_constants),
+        },
     };
 
     VkPipelineLayout PipelineLayout = {0};
@@ -847,6 +1035,7 @@ int main(int ArgCount, char* Args[])
         .pNext = &PipelineRenderingInfo,
         .stageCount = ARRAY_COUNT(StageInfos),
         .pStages = StageInfos,
+        .layout = PipelineLayout,
         .pVertexInputState = &VertexInputStateInfo,
         .pInputAssemblyState = &InputAssemblyStateInfo,
         .pTessellationState = &TessellationStateInfo,
@@ -864,6 +1053,25 @@ int main(int ArgCount, char* Args[])
     vkDestroyShaderModule(Device, FragmentModule, 0);
     vkDestroyShaderModule(Device, VertexModule, 0);
 
+    vulkan_buffer VertexBuffer = {0};
+
+    VulkanMakeBuffer(
+        Device,
+        PhysicalDevice,
+        1 * 1024 * 1024,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT  |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        1,
+        &VertexBuffer
+    );
+
+    VkSemaphoreCreateInfo SemaphoreInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+
     VkSemaphore AcquireSemaphore = {0};
     VK_CHECK(vkCreateSemaphore(Device, &SemaphoreInfo, 0, &AcquireSemaphore));
 
@@ -871,6 +1079,12 @@ int main(int ArgCount, char* Args[])
     VK_CHECK(vkCreateSemaphore(Device, &SemaphoreInfo, 0, &PresentSemaphore));
 
     printf("Vulkan setup good\n");
+
+    render_batch RenderBatch = {0};
+    RenderBatch.MaxRectCount = (unsigned int)(VertexBuffer.Size / (6*sizeof(vulkan_vertex)));
+    RenderBatch.Rects = mmap(0, RenderBatch.MaxRectCount * sizeof(render_rect), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+    assert(RenderBatch.Rects);
 
     unsigned int ImageIndex = 0;
 
@@ -880,6 +1094,41 @@ int main(int ArgCount, char* Args[])
 
         if (Wayland.ReadyToResize)
             VulkanResizeSwapchain(Device, PhysicalDevice, Surface, &Swapchain);
+
+        RenderBatch.RenderSizeX = Swapchain.Width;
+        RenderBatch.RenderSizeY = Swapchain.Height;
+
+        memset(RenderBatch.Projection, 0, sizeof(RenderBatch.Projection));
+
+        RenderBatch.Projection[0]  = 1.0f;
+        RenderBatch.Projection[5]  = 1.0f;
+        RenderBatch.Projection[10] = 1.0f;
+        RenderBatch.Projection[15] = 1.0f;
+
+        RenderBatch.RectCount = 0;
+
+        Render(&RenderBatch);
+
+        unsigned int VertexCount = 0;
+        for (unsigned int RectIndex = 0; RectIndex < RenderBatch.RectCount; RectIndex++)
+        {
+            render_rect* Rect = RenderBatch.Rects + RectIndex;
+
+            vulkan_vertex* V = (vulkan_vertex*)VertexBuffer.Mapping + VertexCount;
+
+            V[0] = (vulkan_vertex){Rect->MinX, Rect->MinY, 0.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+            V[1] = (vulkan_vertex){Rect->MaxX, Rect->MinY, 1.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+            V[2] = (vulkan_vertex){Rect->MaxX, Rect->MaxY, 1.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+
+            V[3] = (vulkan_vertex){Rect->MaxX, Rect->MaxY, 1.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+            V[4] = (vulkan_vertex){Rect->MinX, Rect->MaxY, 0.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+            V[5] = (vulkan_vertex){Rect->MinX, Rect->MinY, 0.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+
+            VertexCount += 6;
+        }
+
+        vulkan_push_constants PushConstants = {0};
+        memcpy(PushConstants.Projection, RenderBatch.Projection, sizeof(RenderBatch.Projection));
 
         VK_CHECK(vkAcquireNextImageKHR(
             Device,
@@ -961,7 +1210,44 @@ int main(int ArgCount, char* Args[])
         vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
 
         vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Pipeline);
-        vkCmdDraw(CommandBuffer, 3, 1, 0, 0);
+
+        VkWriteDescriptorSet DescriptorWrites[] =
+        {
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = 0,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &(VkDescriptorBufferInfo)
+                {
+                    .buffer = VertexBuffer.Buffer,
+                    .offset = 0,
+                    .range = VertexBuffer.Size,
+                },
+            },
+        };
+
+        vkCmdPushDescriptorSet(
+            CommandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            PipelineLayout,
+            0,
+            ARRAY_COUNT(DescriptorWrites),
+            DescriptorWrites
+        );
+
+        vkCmdPushConstants(
+            CommandBuffer,
+            PipelineLayout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(PushConstants),
+            &PushConstants
+        );
+
+        vkCmdDraw(CommandBuffer, VertexCount, 1, 0, 0);
 
         vkCmdEndRendering(CommandBuffer);
 
@@ -1030,10 +1316,12 @@ int main(int ArgCount, char* Args[])
         VK_CHECK(vkDeviceWaitIdle(Device));
     }
 
-    vkDestroyPipeline(Device, Pipeline, 0);
-    vkDestroyPipelineLayout(Device, PipelineLayout, 0);
     vkDestroySemaphore(Device, PresentSemaphore, 0);
     vkDestroySemaphore(Device, AcquireSemaphore, 0);
+    VulkanDestroyBuffer(Device, &VertexBuffer);
+    vkDestroyPipeline(Device, Pipeline, 0);
+    vkDestroyPipelineLayout(Device, PipelineLayout, 0);
+    vkDestroyDescriptorSetLayout(Device, SetLayout, 0);
     vkDestroyCommandPool(Device, CommandPool, 0);
     VulkanDestroySwapchain(Device, &Swapchain);
     vkDestroyDevice(Device, 0);
@@ -1042,7 +1330,11 @@ int main(int ArgCount, char* Args[])
 
     xdg_toplevel_destroy(Wayland.XdgTopLevel);
     xdg_surface_destroy(Wayland.XdgSurface);
+    wl_output_release(Wayland.Output);
     wl_surface_destroy(Wayland.Surface);
+    wl_keyboard_release(Wayland.Keyboard);
+    wl_pointer_release(Wayland.Pointer);
+    wl_seat_destroy(Wayland.Seat);
     xdg_wm_base_destroy(Wayland.XdgWmBase);
     wl_compositor_destroy(Wayland.Compositor);
     wl_registry_destroy(Wayland.Registry);

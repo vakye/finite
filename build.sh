@@ -29,7 +29,8 @@ CompileFlags=" \
 
 LinkFlags=" \
     -fuse-ld=lld \
-    -Wl,-lwayland-client"
+    -Wl,-lwayland-client \
+    -Wl,-lxkbcommon"
 
 clang $CompileFlags $SourceFile $LinkFlags
 
