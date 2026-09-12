@@ -11,11 +11,13 @@ static int          WaylandIsClosed(wayland_state* Wayland);
 static int          WaylandShouldResize(wayland_state* Wayland);
 static unsigned int WaylandGetWidth(wayland_state* Wayland);
 static unsigned int WaylandGetHeight(wayland_state* Wayland);
-static void         WaylandPollEvents(wayland_state* Wayland);
+static void         WaylandPollEvents(wayland_state* Wayland, platform_input* Input);
 static void         WaylandPresent(wayland_state* Wayland);
 
 // NOTE(vak): Implementation
 
+#include <sys/mman.h>
+#include <sys/unistd.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 #include "xdg-shell-client.h"
@@ -45,6 +47,8 @@ struct wayland_state
     int                     IsResizing;
     int                     ReadyToResize;
     int                     Width, Height;
+
+    platform_input*         Input;
 };
 
 static int WaylandConnectDisplay    (wayland_state* Wayland);
@@ -108,9 +112,11 @@ static unsigned int WaylandGetHeight(wayland_state* Wayland)
     return Maximum(0, Wayland->Height);
 }
 
-static void WaylandPollEvents(wayland_state* Wayland)
+static void WaylandPollEvents(wayland_state* Wayland, platform_input* Input)
 {
+    Wayland->Input = Input;
     wl_display_roundtrip(Wayland->Display);
+    Wayland->Input = 0;
 }
 
 static void WaylandPresent(wayland_state* Wayland)
@@ -182,6 +188,53 @@ static void WaylandKeyboardKeymap(
     unsigned int        Size
 )
 {
+    wayland_state* Wayland = (wayland_state*)Data;
+
+    if (Format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
+    {
+        WaylandError("unknown keyboard keymap");
+        return;
+    }
+
+    char* KeymapString = mmap(0, Size, PROT_READ, MAP_PRIVATE, FileDescriptor, 0);
+    if (!KeymapString)
+    {
+        WaylandError("failed to mmap keymap");
+        return;
+    }
+
+    int XkbOkay = true;
+
+    Wayland->XkbContext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!Wayland->XkbContext)
+    {
+        WaylandError("failed to create xkb context");
+        return;
+    }
+
+    Wayland->XkbKeymap = xkb_keymap_new_from_string(
+        Wayland->XkbContext,
+        KeymapString,
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        XKB_KEYMAP_COMPILE_NO_FLAGS
+    );
+
+    if (!Wayland->XkbKeymap)
+    {
+        WaylandError("failed to create xkb keymap");
+        return;
+    }
+
+    Wayland->XkbState = xkb_state_new(Wayland->XkbKeymap);
+
+    if (!Wayland->XkbState)
+    {
+        WaylandError("failed to create xkb state");
+        return;
+    }
+
+    munmap(KeymapString, Size);
+    close(FileDescriptor);
 }
 
 static void WaylandKeyboardEnter(
@@ -212,6 +265,31 @@ static void WaylandKeyboardKey(
     unsigned int        State
 )
 {
+    wayland_state* Wayland = (wayland_state*)Data;
+
+    if (!Wayland->Input)
+        return;
+
+    platform_input* Input = Wayland->Input;
+
+    unsigned int XkbScancode    = EvdevScancode + 8;
+    xkb_keysym_t KeySym         = xkb_state_key_get_one_sym(Wayland->XkbState, XkbScancode);
+    unsigned int IsDown         = (State == WL_KEYBOARD_KEY_STATE_PRESSED);
+
+    input_button Button = U32Max;
+
+    switch (KeySym)
+    {
+        case XKB_KEY_w: case XKB_KEY_Up:    Button = InputButton_MoveUp;        break;
+        case XKB_KEY_a: case XKB_KEY_Left:  Button = InputButton_MoveLeft;      break;
+        case XKB_KEY_s: case XKB_KEY_Down:  Button = InputButton_MoveDown;      break;
+        case XKB_KEY_d: case XKB_KEY_Right: Button = InputButton_MoveRight;     break;
+    }
+
+    if (Button < InputButton_COUNT)
+    {
+        Input->ButtonStates[Button].IsDown = IsDown;
+    }
 }
 
 static void WaylandKeyboardModifiers(

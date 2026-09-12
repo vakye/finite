@@ -34,22 +34,40 @@ static float RandomBilateral(random_state* Entropy)
     return (Result);
 }
 
+typedef enum
+{
+    InputButton_MoveLeft,
+    InputButton_MoveRight,
+    InputButton_MoveUp,
+    InputButton_MoveDown,
+    InputButton_Shoot,
+
+    InputButton_COUNT,
+} input_button;
+
 typedef struct
 {
-    float MouseX;
-    float MouseY;
+    int IsDown;     // NOTE(vak): This frame
+    int WasDown;    // NOTE(vak): Last frame
+} input_button_state;
 
-    float WindowSizeX;
-    float WindowSizeY;
+typedef struct
+{
+    input_button_state ButtonStates[InputButton_COUNT];
+} platform_input;
 
-    int MovePlayerLeft;
-    int MovePlayerRight;
-    int MovePlayerUp;
-    int MovePlayerDown;
-    int PlayerShoot;
+static int IsInputButtonDown(platform_input* Input, input_button Button)
+{
+    return Input->ButtonStates[Button].IsDown;
+}
 
-    float DeltaTime;
-} input;
+typedef struct
+{
+    unsigned int    WindowSizeX;
+    unsigned int    WindowSizeY;
+    float           DeltaTime;
+    platform_input  Input;
+} platform;
 
 typedef struct
 {
@@ -107,16 +125,16 @@ static float GetCameraViewSizeY(camera* Camera)
     return (Result);
 }
 
-static float ToWorldX(input* Input, camera* Camera, float ScreenX)
+static float ToWorldX(platform* Platform, camera* Camera, float ScreenX)
 {
-    float Normalized = -1.0f + 2.0f*(ScreenX / Input->WindowSizeX);
+    float Normalized = -1.0f + 2.0f*(ScreenX / Platform->WindowSizeX);
     float Result = (GetCameraViewSizeX(Camera) * 0.5f * Normalized) - Camera->ViewCenterX;
     return (Result);
 }
 
-static float ToWorldY(input* Input, camera* Camera, float ScreenY)
+static float ToWorldY(platform* Platform, camera* Camera, float ScreenY)
 {
-    float Normalized = -1.0f + 2.0f*(ScreenY / Input->WindowSizeY);
+    float Normalized = -1.0f + 2.0f*(ScreenY / Platform->WindowSizeY);
     float Result = (GetCameraViewSizeY(Camera) * 0.5f * Normalized) - Camera->ViewCenterY;
     return (Result);
 }
@@ -256,13 +274,15 @@ static void EnemyTryShootBullet(world* World, enemy* Enemy)
 }
 
 static void UpdateWorld(
-    input* Input,       // NOTE(vak): Input
-    world* World        // NOTE(vak): Input/Output
+    platform*   Platform,   // NOTE(vak): Input
+    world*      World       // NOTE(vak): Input/Output
 )
 {
+    platform_input* Input = &Platform->Input;
+
     {
         camera* Camera = &World->Camera;
-        Camera->AspectRatio = (float)Input->WindowSizeX / (float)Input->WindowSizeY;
+        Camera->AspectRatio = (float)Platform->WindowSizeX / (float)Platform->WindowSizeY;
     }
 
     {
@@ -301,18 +321,18 @@ static void UpdateWorld(
     {
         player* Player = &World->Player;
 
-        Player->ShootCooldown -= Input->DeltaTime;
+        Player->ShootCooldown -= Platform->DeltaTime;
         Player->ShootCooldown = Maximum(0, Player->ShootCooldown);
 
-        if (Input->PlayerShoot)     PlayerTryShootBullet(World, Player);
+        if (IsInputButtonDown(Input, InputButton_Shoot))        PlayerTryShootBullet(World, Player);
 
         float DirectionX = 0.0f;
         float DirectionY = 0.0f;
 
-        if (Input->MovePlayerLeft)  DirectionX -= 1.0f;
-        if (Input->MovePlayerRight) DirectionX += 1.0f;
-        if (Input->MovePlayerDown)  DirectionY -= 1.0f;
-        if (Input->MovePlayerUp)    DirectionY += 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveLeft))     DirectionX -= 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveRight))    DirectionX += 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveDown))     DirectionY -= 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveUp))       DirectionY += 1.0f;
 
         if ((DirectionX != 0.0f) && (DirectionY != 0.0f))
         {
@@ -320,16 +340,16 @@ static void UpdateWorld(
             DirectionY *= 0.7071067811865475244f; // NOTE(vak): 1.0 / sqrt(2)
         }
 
-        float Friction  = 0.3f;
+        float Friction  = 50.0f;
         float MoveForce = 400.0f;
 
-        float ImpulseX = (-Player->DX * Friction) + (DirectionX * MoveForce)*Input->DeltaTime;
-        float ImpulseY = (-Player->DY * Friction) + (DirectionY * MoveForce)*Input->DeltaTime;
+        float DDX = (-Player->DX * Friction) + (DirectionX * MoveForce);
+        float DDY = (-Player->DY * Friction) + (DirectionY * MoveForce);
 
-        Player->DX += ImpulseX;
-        Player->DY += ImpulseY;
-        Player->X += Player->DX * Input->DeltaTime;
-        Player->Y += Player->DY * Input->DeltaTime;
+        Player->DX += DDX * Platform->DeltaTime;
+        Player->DY += DDY * Platform->DeltaTime;
+        Player->X += Player->DX * Platform->DeltaTime;
+        Player->Y += Player->DY * Platform->DeltaTime;
     }
 
     {
@@ -342,10 +362,10 @@ static void UpdateWorld(
             Enemy->DX = 1.5f*RandomBilateral(&World->Entropy);
             Enemy->DY = 1.5f*RandomBilateral(&World->Entropy);
 
-            Enemy->X += Enemy->DX * Input->DeltaTime;
-            Enemy->Y += Enemy->DY * Input->DeltaTime;
+            Enemy->X += Enemy->DX * Platform->DeltaTime;
+            Enemy->Y += Enemy->DY * Platform->DeltaTime;
 
-            Enemy->ShootCooldown -= Input->DeltaTime;
+            Enemy->ShootCooldown -= Platform->DeltaTime;
             Enemy->ShootCooldown = Maximum(0, Enemy->ShootCooldown);
 
             EnemyTryShootBullet(World, Enemy);
@@ -367,10 +387,10 @@ static void UpdateWorld(
                 Bullet->DDX = 0.8f*(TargetX - Bullet->X);
             }
 
-            Bullet->DX += Bullet->DDX * Input->DeltaTime;
-            Bullet->DY += Bullet->DDY * Input->DeltaTime;
-            Bullet->X += Bullet->DX * Input->DeltaTime;
-            Bullet->Y += Bullet->DY * Input->DeltaTime;
+            Bullet->DX += Bullet->DDX * Platform->DeltaTime;
+            Bullet->DY += Bullet->DDY * Platform->DeltaTime;
+            Bullet->X += Bullet->DX * Platform->DeltaTime;
+            Bullet->Y += Bullet->DY * Platform->DeltaTime;
         }
     }
 }

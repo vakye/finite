@@ -17,8 +17,6 @@
 #define VK_USE_PLATFORM_WAYLAND_KHR 1
 #include "vulkan.c"
 
-static input Input = {0};
-
 int main(int ArgCount, char* Args[])
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -38,27 +36,41 @@ int main(int ArgCount, char* Args[])
     }
 
     render_spec RenderSpec = {0};
-    RenderSpec.MaxRectCount = 65536;
-    RenderSpec.Rects = mmap(0, RenderSpec.MaxRectCount * sizeof(render_rect), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-
-    if (!RenderSpec.Rects)
     {
-        fprintf(stderr, "failed to allocate RenderSpec.Rects\n");
-        return (1);
+        RenderSpec.MaxRectCount = 65536;
+        RenderSpec.Rects = mmap(0, RenderSpec.MaxRectCount * sizeof(render_rect), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+        if (!RenderSpec.Rects)
+        {
+            fprintf(stderr, "failed to allocate RenderSpec.Rects\n");
+            return (1);
+        }
     }
 
     world World = {0};
-    SetupWorld(&World);
+    {
+        SetupWorld(&World);
+    }
 
-    Input.DeltaTime = 1.0f / 60.0f;
-    unsigned int ImageIndex = 0;
+    platform Platform = {0};
+    platform_input* Input = &Platform.Input;
+
+    {
+        Platform.DeltaTime = 1.0f / 60.0f;
+    }
 
     struct timespec FrameBegin = {0};
     clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
 
     while (!WaylandIsClosed(&Wayland))
     {
-        WaylandPollEvents(&Wayland);
+        for (unsigned int Index = 0; Index < ARRAY_COUNT(Input->ButtonStates); Index++)
+        {
+            input_button_state* State = Input->ButtonStates + Index;
+            State->WasDown = State->IsDown;
+        }
+
+        WaylandPollEvents(&Wayland, &Platform.Input);
 
         if (WaylandShouldResize(&Wayland))
         {
@@ -66,12 +78,12 @@ int main(int ArgCount, char* Args[])
                 break;
         }
 
-        Input.WindowSizeX = WaylandGetWidth(&Wayland);
-        Input.WindowSizeY = WaylandGetHeight(&Wayland);
+        Platform.WindowSizeX = WaylandGetWidth(&Wayland);
+        Platform.WindowSizeY = WaylandGetHeight(&Wayland);
 
         render_batch RenderBatch = {0};
 
-        UpdateWorld(&Input, &World);
+        UpdateWorld(&Platform, &World);
         RenderWorld(&World, &RenderSpec, &RenderBatch);
 
         if (!VulkanRender(&Vulkan, &RenderSpec, &RenderBatch))
@@ -82,7 +94,7 @@ int main(int ArgCount, char* Args[])
         struct timespec Now = {0};
         clock_gettime(CLOCK_MONOTONIC, &Now);
 
-        Input.DeltaTime =
+        Platform.DeltaTime =
             (double)(Now.tv_sec - FrameBegin.tv_sec) +
             (double)(Now.tv_nsec - FrameBegin.tv_nsec) * 1e-9;
 
