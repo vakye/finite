@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <immintrin.h>
+
 #define ARRAY_COUNT(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))

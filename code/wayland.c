@@ -288,9 +288,7 @@ static void WaylandKeyboardKey(
     }
 
     if (Button < InputButton_COUNT)
-    {
         Input->ButtonStates[Button].IsDown = IsDown;
-    }
 }
 
 static void WaylandKeyboardModifiers(

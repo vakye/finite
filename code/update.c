@@ -71,37 +71,36 @@ typedef struct
 
 typedef struct
 {
-    float X, Y;
-    float DX, DY;
-    float SizeX, SizeY;
-    float ShootCooldown;
+    v2      P;
+    v2      DP;
+    v2      Size;
+    float   ShootCooldown;
 } player;
 
 typedef struct
 {
-    float ViewCenterX;
-    float ViewCenterY;
-    float AspectRatio;
-    float FocalLength;
+    v2      ViewCenter;
+    float   AspectRatio;
+    float   FocalLength;
 } camera;
 
 typedef struct
 {
-    int   Live;
-    int   ShotByEnemy;
-    float X, Y;
-    float DX, DY;
-    float DDX, DDY;
-    float SizeX, SizeY;
+    int     Live;
+    int     ShotByEnemy;
+    v2      P;
+    v2      DP;
+    v2      DDP;
+    v2      Size;
 } bullet;
 
 typedef struct
 {
-    int   Live;
-    float X, Y;
-    float DX, DY;
-    float SizeX, SizeY;
-    float ShootCooldown;
+    int     Live;
+    v2      P;
+    v2      DP;
+    v2      Size;
+    float   ShootCooldown;
 } enemy;
 
 typedef struct
@@ -113,29 +112,13 @@ typedef struct
     enemy           Enemies[128];
 } world;
 
-static float GetCameraViewSizeX(camera* Camera)
+static v2 CameraGetViewSize(camera* Camera)
 {
-    float Result = Camera->AspectRatio / Camera->FocalLength;
-    return (Result);
-}
+    v2 Result = V2(
+        Camera->AspectRatio / Camera->FocalLength,
+        1.0f                / Camera->FocalLength
+    );
 
-static float GetCameraViewSizeY(camera* Camera)
-{
-    float Result = 1.0f / Camera->FocalLength;
-    return (Result);
-}
-
-static float ToWorldX(platform* Platform, camera* Camera, float ScreenX)
-{
-    float Normalized = -1.0f + 2.0f*(ScreenX / Platform->WindowSizeX);
-    float Result = (GetCameraViewSizeX(Camera) * 0.5f * Normalized) - Camera->ViewCenterX;
-    return (Result);
-}
-
-static float ToWorldY(platform* Platform, camera* Camera, float ScreenY)
-{
-    float Normalized = -1.0f + 2.0f*(ScreenY / Platform->WindowSizeY);
-    float Result = (GetCameraViewSizeY(Camera) * 0.5f * Normalized) - Camera->ViewCenterY;
     return (Result);
 }
 
@@ -163,10 +146,13 @@ static void SpawnEnemy(world* World)
         return;
 
     Enemy->Live = 1;
-    Enemy->X = 7.0f*RandomBilateral(&World->Entropy);
-    Enemy->Y = 6.0f + 2.0f*RandomBilateral(&World->Entropy);
-    Enemy->SizeX = 0.4f;
-    Enemy->SizeY = 0.4f;
+
+    Enemy->P = V2(
+        7.0f*RandomBilateral(&World->Entropy),
+        6.0f + 2.0f*RandomBilateral(&World->Entropy)
+    );
+
+    Enemy->Size = V2(0.4f, 0.4f);
     Enemy->ShootCooldown = 1.0f + 2.0f*RandomUnilateral(&World->Entropy);
 }
 
@@ -181,18 +167,15 @@ static void SetupWorld(world* World)
     {
         camera* Camera = &World->Camera;
 
-        Camera->ViewCenterX = 0.0f;
-        Camera->ViewCenterY = 0.0f;
+        Camera->ViewCenter = V2Zero();
         Camera->FocalLength = 0.05f;
     }
 
     {
         player* Player = &World->Player;
 
-        Player->X           = +0.0f;
-        Player->Y           = -6.5f;
-        Player->SizeX       = +0.6f;
-        Player->SizeY       = +0.3f;
+        Player->P       = V2(0.0f, -6.5f);
+        Player->Size    = V2(0.6f, 0.3f);
     }
 
     {
@@ -231,16 +214,14 @@ static void PlayerTryShootBullet(world* World, player* Player)
 
     Bullet->Live = 1;
 
-    Bullet->SizeX = 0.075f;
-    Bullet->SizeY = 0.5f;
+    Bullet->Size = V2(0.075f, 0.5f);
+    Bullet->P = V2(
+        Player->P.X,
+        Player->P.Y + 0.5f*Player->Size.Y + Bullet->Size.Y
+    );
 
-    Bullet->X = Player->X;
-    Bullet->Y = Player->Y + 0.5f*Player->SizeY + Bullet->SizeY;
-
-    Bullet->DX = 0.0f;
-    Bullet->DY = 10.0f;
-    Bullet->DDX = 0.0f;
-    Bullet->DDY = 30.0f;
+    Bullet->DP = V2(0.0f, 10.0f);
+    Bullet->DDP = V2(0.0f, 30.0f);
 
     Player->ShootCooldown = 0.12f;
 }
@@ -259,16 +240,14 @@ static void EnemyTryShootBullet(world* World, enemy* Enemy)
     Bullet->Live = 1;
     Bullet->ShotByEnemy = 1;
 
-    Bullet->SizeX = 0.1f;
-    Bullet->SizeY = 0.1f;
+    Bullet->Size = V2(0.1f, 0.1f);
+    Bullet->P = V2(
+        Enemy->P.X,
+        Enemy->P.Y - 0.5f*Enemy->Size.Y - Bullet->Size.Y
+    );
 
-    Bullet->X = Enemy->X;
-    Bullet->Y = Enemy->Y - 0.5f*Enemy->SizeY - Bullet->SizeY;
-
-    Bullet->DX = 0.0f;
-    Bullet->DY = -5.0f;
-    Bullet->DDX = 0.0f;
-    Bullet->DDY = -10.0f;
+    Bullet->DP = V2(0.0f, -5.0f);
+    Bullet->DDP = V2(0.0f, -10.0f);
 
     Enemy->ShootCooldown = 1.0f + 1.0f*RandomUnilateral(&World->Entropy);
 }
@@ -288,13 +267,9 @@ static void UpdateWorld(
     {
         camera* Camera = &World->Camera;
 
-        float ViewSizeX = GetCameraViewSizeX(Camera);
-        float ViewSizeY = GetCameraViewSizeY(Camera);
-
-        float ViewMinX  = Camera->ViewCenterX - 0.5f*ViewSizeX;
-        float ViewMinY  = Camera->ViewCenterY - 0.5f*ViewSizeY;
-        float ViewMaxX  = Camera->ViewCenterX + 0.5f*ViewSizeX;
-        float ViewMaxY  = Camera->ViewCenterY + 0.5f*ViewSizeY;
+        v2 ViewCenter   = Camera->ViewCenter;
+        v2 ViewSize     = CameraGetViewSize(Camera);
+        rect2 ViewRect  = R2CenterSize(ViewCenter, ViewSize);
 
         for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
         {
@@ -302,18 +277,9 @@ static void UpdateWorld(
             if (!Bullet->Live)
                 continue;
 
-            float BulletMinX  = Bullet->X - 0.5f*Bullet->SizeX;
-            float BulletMinY  = Bullet->Y - 0.5f*Bullet->SizeY;
-            float BulletMaxX  = Bullet->X + 0.5f*Bullet->SizeX;
-            float BulletMaxY  = Bullet->Y + 0.5f*Bullet->SizeY;
+            rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
 
-            int OutsideScreen =
-                (BulletMinY > ViewMaxY) ||
-                (BulletMinX > ViewMaxX) ||
-                (BulletMaxX < ViewMinX) ||
-                (BulletMaxY < ViewMinY);
-
-            if (OutsideScreen)
+            if (!R2Intersect(BulletRect, ViewRect))
                 Bullet->Live = 0;
         }
     }
@@ -326,30 +292,25 @@ static void UpdateWorld(
 
         if (IsInputButtonDown(Input, InputButton_Shoot))        PlayerTryShootBullet(World, Player);
 
-        float DirectionX = 0.0f;
-        float DirectionY = 0.0f;
+        v2 MoveDirection = V2(0, 0);
 
-        if (IsInputButtonDown(Input, InputButton_MoveLeft))     DirectionX -= 1.0f;
-        if (IsInputButtonDown(Input, InputButton_MoveRight))    DirectionX += 1.0f;
-        if (IsInputButtonDown(Input, InputButton_MoveDown))     DirectionY -= 1.0f;
-        if (IsInputButtonDown(Input, InputButton_MoveUp))       DirectionY += 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveLeft))     MoveDirection.X -= 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveRight))    MoveDirection.X += 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveDown))     MoveDirection.Y -= 1.0f;
+        if (IsInputButtonDown(Input, InputButton_MoveUp))       MoveDirection.Y += 1.0f;
 
-        if ((DirectionX != 0.0f) && (DirectionY != 0.0f))
-        {
-            DirectionX *= 0.7071067811865475244f; // NOTE(vak): 1.0 / sqrt(2)
-            DirectionY *= 0.7071067811865475244f; // NOTE(vak): 1.0 / sqrt(2)
-        }
+        MoveDirection = V2NormalizeOrZero(MoveDirection);
 
         float Friction  = 50.0f;
         float MoveForce = 400.0f;
 
-        float DDX = (-Player->DX * Friction) + (DirectionX * MoveForce);
-        float DDY = (-Player->DY * Friction) + (DirectionY * MoveForce);
+        v2 DDP = V2Sub(
+            V2MulScalar(MoveDirection,  MoveForce),
+            V2MulScalar(Player->DP,     Friction)
+        );
 
-        Player->DX += DDX * Platform->DeltaTime;
-        Player->DY += DDY * Platform->DeltaTime;
-        Player->X += Player->DX * Platform->DeltaTime;
-        Player->Y += Player->DY * Platform->DeltaTime;
+        Player->DP = V2Add(Player->DP, V2MulScalar(DDP,         Platform->DeltaTime));
+        Player->P  = V2Add(Player->P,  V2MulScalar(Player->DP,  Platform->DeltaTime));
     }
 
     {
@@ -359,11 +320,12 @@ static void UpdateWorld(
             if (!Enemy->Live)
                 continue;
 
-            Enemy->DX = 1.5f*RandomBilateral(&World->Entropy);
-            Enemy->DY = 1.5f*RandomBilateral(&World->Entropy);
+            Enemy->DP = V2(
+                1.5f*RandomBilateral(&World->Entropy),
+                1.5f*RandomBilateral(&World->Entropy)
+            );
 
-            Enemy->X += Enemy->DX * Platform->DeltaTime;
-            Enemy->Y += Enemy->DY * Platform->DeltaTime;
+            Enemy->P = V2Add(Enemy->P, V2MulScalar(Enemy->DP, Platform->DeltaTime));
 
             Enemy->ShootCooldown -= Platform->DeltaTime;
             Enemy->ShootCooldown = Maximum(0, Enemy->ShootCooldown);
@@ -381,16 +343,13 @@ static void UpdateWorld(
 
             if (Bullet->ShotByEnemy)
             {
-                float TargetX = World->Player.X;
-                float TargetY = World->Player.Y;
+                v2 TargetP = World->Player.P;
 
-                Bullet->DDX = 0.8f*(TargetX - Bullet->X);
+                Bullet->DDP.X = 0.8f*(TargetP.X - Bullet->P.X);
             }
 
-            Bullet->DX += Bullet->DDX * Platform->DeltaTime;
-            Bullet->DY += Bullet->DDY * Platform->DeltaTime;
-            Bullet->X += Bullet->DX * Platform->DeltaTime;
-            Bullet->Y += Bullet->DY * Platform->DeltaTime;
+            Bullet->DP = V2Add(Bullet->DP, V2MulScalar(Bullet->DDP, Platform->DeltaTime));
+            Bullet->P  = V2Add(Bullet->P,  V2MulScalar(Bullet->DP,  Platform->DeltaTime));
         }
     }
 }

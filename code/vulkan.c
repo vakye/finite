@@ -70,14 +70,14 @@ struct vulkan_state
 
 typedef struct
 {
-    float X, Y;
-    float U, V;
-    float R, G, B, A;
+    v2 Position;
+    v2 TexCoord;
+    v4 Color;
 } vulkan_vertex;
 
 typedef struct
 {
-    float Projection[16];
+    m4x4 Projection;
 } vulkan_push_constants;
 
 static void VulkanError(char* Message);
@@ -298,23 +298,28 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
 
     for (unsigned int RectIndex = 0; RectIndex < Batch->RectCount; RectIndex++)
     {
-        render_rect* Rect = Spec->Rects + RectIndex;
+        render_rect* RenderRect = Spec->Rects + RectIndex;
+
+        v2 Min = RenderRect->Rect.Min;
+        v2 Max = RenderRect->Rect.Max;
 
         vulkan_vertex* V = (vulkan_vertex*)Vulkan->VertexBuffer.Mapping + VertexCount;
 
-        V[0] = (vulkan_vertex){Rect->MinX, Rect->MinY, 0.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
-        V[1] = (vulkan_vertex){Rect->MaxX, Rect->MinY, 1.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
-        V[2] = (vulkan_vertex){Rect->MaxX, Rect->MaxY, 1.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+        V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
+        V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(1.0f, 0.0f), RenderRect->Color};
+        V[2] = (vulkan_vertex){V2(Max.X, Max.Y), V2(1.0f, 1.0f), RenderRect->Color};
 
-        V[3] = (vulkan_vertex){Rect->MaxX, Rect->MaxY, 1.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
-        V[4] = (vulkan_vertex){Rect->MinX, Rect->MaxY, 0.0f, 1.0f, Rect->R, Rect->G, Rect->B, Rect->A};
-        V[5] = (vulkan_vertex){Rect->MinX, Rect->MinY, 0.0f, 0.0f, Rect->R, Rect->G, Rect->B, Rect->A};
+        V[3] = (vulkan_vertex){V2(Max.X, Max.Y), V2(1.0f, 1.0f), RenderRect->Color};
+        V[4] = (vulkan_vertex){V2(Min.X, Max.Y), V2(0.0f, 1.0f), RenderRect->Color};
+        V[5] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
 
         VertexCount += 6;
     }
 
-    vulkan_push_constants PushConstants = {0};
-    memcpy(PushConstants.Projection, Batch->Projection, sizeof(Batch->Projection));
+    vulkan_push_constants PushConstants =
+    {
+        .Projection = Batch->Projection,
+    };
 
     unsigned int ImageIndex = 0;
 

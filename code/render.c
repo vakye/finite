@@ -1,9 +1,8 @@
 
 typedef struct
 {
-    float MinX, MinY;
-    float MaxX, MaxY;
-    float R, G, B, A;
+    rect2   Rect;
+    v4      Color;
 } render_rect;
 
 typedef struct
@@ -14,55 +13,23 @@ typedef struct
 
 typedef struct
 {
-    float           Projection[16];
+    m4x4            Projection;
     unsigned int    RectCount;
 } render_batch;
 
-static void PushOrthographic2D(
-    render_spec* Spec,
-    render_batch* Batch,
-    float ViewMinX, float ViewMinY,
-    float ViewMaxX, float ViewMaxY
-)
+static void PushOrthographic2D(render_spec* Spec, render_batch* Batch, rect2 ViewRect)
 {
-    float ScaleX = 2.0f / (ViewMaxX - ViewMinX);
-    float ScaleY = 2.0f / (ViewMaxY - ViewMinY);
-
-    float TranslateX = ScaleX * -0.5f * (ViewMinX + ViewMaxX);
-    float TranslateY = ScaleY * -0.5f * (ViewMinY + ViewMaxY);
-
-    memset(Batch->Projection, 0, sizeof(Batch->Projection));
-
-    Batch->Projection[0]    = ScaleX;
-    Batch->Projection[5]    = ScaleY;
-    Batch->Projection[10]   = 1.0f;
-    Batch->Projection[15]   = 1.0f;
-
-    Batch->Projection[12]   = TranslateX;
-    Batch->Projection[13]   = TranslateY;
+    Batch->Projection = M4x4Orthographic2D(ViewRect);
 }
 
-static void PushRect(
-    render_spec* Spec,
-    render_batch* Batch,
-    float CenterX, float CenterY,
-    float SizeX, float SizeY,
-    float R, float G, float B, float A
-)
+static void PushRect(render_spec* Spec, render_batch* Batch, rect2 Rect, v4 Color)
 {
     assert(Batch->RectCount < Spec->MaxRectCount);
 
-    render_rect* Rect = Spec->Rects + Batch->RectCount++;
+    render_rect* RenderRect = Spec->Rects + Batch->RectCount++;
 
-    Rect->MinX = CenterX - 0.5f*SizeX;
-    Rect->MinY = CenterY - 0.5f*SizeY;
-    Rect->MaxX = CenterX + 0.5f*SizeX;
-    Rect->MaxY = CenterY + 0.5f*SizeY;
-
-    Rect->R = R;
-    Rect->G = G;
-    Rect->B = B;
-    Rect->A = A;
+    RenderRect->Rect = Rect;
+    RenderRect->Color = Color;
 }
 
 static void RenderWorld(
@@ -76,19 +43,10 @@ static void RenderWorld(
     {
         camera* Camera = &World->Camera;
 
-        float ViewSizeX = GetCameraViewSizeX(Camera);
-        float ViewSizeY = GetCameraViewSizeY(Camera);
+        v2 ViewCenter   = Camera->ViewCenter;
+        v2 ViewSize     = CameraGetViewSize(Camera);
 
-        float ViewMinX = Camera->ViewCenterX - 0.5f * ViewSizeX;
-        float ViewMinY = Camera->ViewCenterY - 0.5f * ViewSizeY;
-        float ViewMaxX = Camera->ViewCenterX + 0.5f * ViewSizeX;
-        float ViewMaxY = Camera->ViewCenterY + 0.5f * ViewSizeY;
-
-        PushOrthographic2D(
-            Spec, Batch,
-            ViewMinX, ViewMinY,
-            ViewMaxX, ViewMaxY
-        );
+        PushOrthographic2D(Spec, Batch, R2CenterSize(ViewCenter, ViewSize));
     }
 
     {
@@ -98,24 +56,14 @@ static void RenderWorld(
             if (!Bullet->Live)
                 continue;
 
-            PushRect(
-                Spec, Batch,
-                Bullet->X, Bullet->Y,
-                Bullet->SizeX, Bullet->SizeY,
-                1.0f, 0.2f, 0.2f, 1.0f
-            );
+            PushRect(Spec, Batch, R2CenterSize(Bullet->P, Bullet->Size), V4(1.0f, 0.2f, 0.2f, 1.0f));
         }
     }
 
     {
         player* Player = &World->Player;
 
-        PushRect(
-            Spec, Batch,
-            Player->X, Player->Y,
-            Player->SizeX, Player->SizeY,
-            1.0f, 0.8f, 0.5f, 1.0f
-        );
+        PushRect(Spec, Batch, R2CenterSize(Player->P, Player->Size), V4(1.0f, 0.8f, 0.5f, 1.0f));
     }
 
     {
@@ -125,12 +73,7 @@ static void RenderWorld(
             if (!Enemy->Live)
                 continue;
 
-            PushRect(
-                Spec, Batch,
-                Enemy->X, Enemy->Y,
-                Enemy->SizeX, Enemy->SizeY,
-                0.2f, 0.3f, 0.9f, 1.0f
-            );
+            PushRect(Spec, Batch, R2CenterSize(Enemy->P, Enemy->Size), V4(0.2f, 0.3f, 0.9f, 1.0f));
         }
     }
 }
