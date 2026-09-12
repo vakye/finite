@@ -101,5 +101,21 @@ static void RenderWorld(
             1.0f, 0.8f, 0.5f, 1.0f
         );
     }
+
+    {
+        for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
+        {
+            bullet* Bullet = World->Bullets + Index;
+            if (!Bullet->Live)
+                continue;
+
+            PushRect(
+                Spec, Batch,
+                Bullet->X, Bullet->Y,
+                Bullet->SizeX, Bullet->SizeY,
+                1.0f, 0.2f, 0.2f, 1.0f
+            );
+        }
+    }
 }
 

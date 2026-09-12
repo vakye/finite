@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "shared.c"
 #include "update.c"
 #include "render.c"
 
@@ -197,6 +198,7 @@ static void HandleKeyboardKey(
         case XKB_KEY_a: case XKB_KEY_Left:      Input.MovePlayerLeft    = Pressed; break;
         case XKB_KEY_s: case XKB_KEY_Down:      Input.MovePlayerDown    = Pressed; break;
         case XKB_KEY_d: case XKB_KEY_Right:     Input.MovePlayerRight   = Pressed; break;
+        case XKB_KEY_space:                     Input.PlayerShoot       = Pressed; break;
     }
 }
 
@@ -352,8 +354,6 @@ static struct xdg_toplevel_listener XdgTopLevelListener =
         } \
     } \
     while (0)
-
-#define ARRAY_COUNT(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 typedef struct
 {

@@ -11,6 +11,7 @@ typedef struct
     int MovePlayerRight;
     int MovePlayerUp;
     int MovePlayerDown;
+    int PlayerShoot;
 
     float DeltaTime;
 } input;
@@ -20,6 +21,7 @@ typedef struct
     float X, Y;
     float DX, DY;
     float SizeX, SizeY;
+    float ShootCooldown;
 } player;
 
 typedef struct
@@ -32,8 +34,18 @@ typedef struct
 
 typedef struct
 {
+    int   Live;
+    float X, Y;
+    float DX, DY;
+    float DDX, DDY;
+    float SizeX, SizeY;
+} bullet;
+
+typedef struct
+{
     player Player;
     camera Camera;
+    bullet Bullets[128];
 } world;
 
 static float GetCameraViewSizeX(camera* Camera)
@@ -84,6 +96,50 @@ static void SetupWorld(world* World)
     }
 }
 
+static bullet* GrabDeadBulletSlot(world* World)
+{
+    bullet* Bullet = 0;
+
+    for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
+    {
+        bullet* Candidate = World->Bullets + Index;
+        if (!Candidate->Live)
+        {
+            Bullet = Candidate;
+            break;
+        }
+    }
+
+    return (Bullet);
+}
+
+static void PlayerShootBullet(world* World, player* Player)
+{
+    if (Player->ShootCooldown > 0.0f)
+        return;
+
+    bullet* Bullet = GrabDeadBulletSlot(World);
+    if (!Bullet)
+        return;
+
+    memset(Bullet, 0, sizeof(bullet));
+
+    Bullet->Live = 1;
+
+    Bullet->SizeX = 0.075f;
+    Bullet->SizeY = 0.5f;
+
+    Bullet->X = Player->X;
+    Bullet->Y = Player->Y + 0.5f*Player->SizeY + Bullet->SizeY;
+
+    Bullet->DX = 0.0f;
+    Bullet->DY = 10.0f;
+    Bullet->DDX = 0.0f;
+    Bullet->DDY = 30.0f;
+
+    Player->ShootCooldown = 0.12f;
+}
+
 static void UpdateWorld(
     input* Input,       // NOTE(vak): Input
     world* World        // NOTE(vak): Input/Output
@@ -94,11 +150,32 @@ static void UpdateWorld(
         Camera->AspectRatio = (float)Input->WindowSizeX / (float)Input->WindowSizeY;
     }
 
-    float MouseWorldX = ToWorldX(Input, &World->Camera, Input->MouseX);
-    float MouseWorldY = ToWorldY(Input, &World->Camera, Input->MouseY);
+    {
+        camera* Camera = &World->Camera;
+
+        float ViewSizeY = GetCameraViewSizeY(Camera);
+        float ViewMaxY  = Camera->ViewCenterY + 0.5f*ViewSizeY;
+
+        for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
+        {
+            bullet* Bullet = World->Bullets + Index;
+            if (!Bullet->Live)
+                continue;
+
+            float BulletMinY = Bullet->Y - 0.5f*Bullet->SizeY;
+
+            if (BulletMinY > ViewMaxY)
+                Bullet->Live = 0;
+        }
+    }
 
     {
         player* Player = &World->Player;
+
+        Player->ShootCooldown -= Input->DeltaTime;
+        Player->ShootCooldown = Maximum(0, Player->ShootCooldown);
+
+        if (Input->PlayerShoot)     PlayerShootBullet(World, Player);
 
         float DirectionX = 0.0f;
         float DirectionY = 0.0f;
@@ -114,8 +191,8 @@ static void UpdateWorld(
             DirectionY *= 0.7071067811865475244f; // NOTE(vak): 1.0 / sqrt(2)
         }
 
-        float Friction  = 0.12f;
-        float MoveForce = 160.0f;
+        float Friction  = 0.3f;
+        float MoveForce = 400.0f;
 
         float ImpulseX = (-Player->DX * Friction) + (DirectionX * MoveForce)*Input->DeltaTime;
         float ImpulseY = (-Player->DY * Friction) + (DirectionY * MoveForce)*Input->DeltaTime;
@@ -124,6 +201,20 @@ static void UpdateWorld(
         Player->DY += ImpulseY;
         Player->X += Player->DX * Input->DeltaTime;
         Player->Y += Player->DY * Input->DeltaTime;
+    }
+
+    {
+        for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
+        {
+            bullet* Bullet = World->Bullets + Index;
+            if (!Bullet->Live)
+                continue;
+
+            Bullet->DX += Bullet->DDX * Input->DeltaTime;
+            Bullet->DY += Bullet->DDY * Input->DeltaTime;
+            Bullet->X += Bullet->DX * Input->DeltaTime;
+            Bullet->Y += Bullet->DY * Input->DeltaTime;
+        }
     }
 }
 

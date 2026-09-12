@@ -1,0 +1,101 @@
+
+====================================================================================================================
+
+[Gameplay Loop]
+
+    [ ] - Stage generation
+    [ ] - Progress to next stage
+    [ ] - Boss stage
+    [ ] - Shop stage
+    [ ] - Currency
+
+[Player]
+
+    [x] - Move player around
+    [x] - Player shoot attack
+    [ ] - Player slash attack
+    [ ] - Upgrades
+    [ ] - Equipment
+
+[Enemies]
+
+    [ ] - Spawn enemies
+    [ ] - Enemy take damage
+    [ ] - Enemy fire bullets
+    [ ] - Enemy drop power up by chance upon death
+    [ ] - Enemy yields money upon death
+
+[Art]
+
+    [ ] - Normal stage background
+    [ ] - Player character
+    [ ] - Enemies
+    [ ] - Bullet orbs
+    [ ] - Familiars/Friendlies
+
+[Sound Effects]
+
+    [ ] - Shoot bullet sound
+    [ ] - Enemy hit sound
+    [ ] - Enemy death sound
+    [ ] - Player death sound
+
+[Visual Effects]
+
+    [ ] - Bullet Smoke
+    [ ] - Bullet Impact
+    [ ] - Particle effects
+
+[Music]
+
+    [ ] - Normal stage music
+    [ ] - Main menu music
+
+[UI]
+
+    [ ] - Main menu
+    [ ] - Pause screen
+
+====================================================================================================================
+
+[Math Library]
+
+    [ ] - Vectors
+    [ ] - Matrices
+    [ ] - Rectangles
+    [ ] - Sin, Cos, Tan
+    [ ] - Exp, Ln
+
+====================================================================================================================
+
+[Operating System]
+
+    [ ] - Memory management callbacks
+    [ ] - File system function callbacks
+
+[Architecture]
+
+    [ ] - Seperate Wayland graphical/input backend
+    [ ] - Seperate Vulkan renderer backend
+    [ ] - Unified platform struct
+
+[Graphics Backend]
+
+    [x] - Open a Wayland window
+    [x] - Render colored rectangles with Vulkan
+    [ ] - Vulkan textures + render textured rectangles
+    [ ] - Load raw pixel image into a texture
+    [ ] - Draw text using a simple font atlas
+
+[Input Backend]
+
+    [x] - Wayland Keyboard
+    [x] - Wayland Mouse
+
+[Audio Backend]
+
+    [ ] - Sound playback using ALSA API and libasound
+            + Helpful reference: https://gist.github.com/ghedo/963382/815c98d1ba0eda1b486eb9d80d9a91a81d995283
+
+====================================================================================================================
+
