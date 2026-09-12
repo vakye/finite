@@ -284,6 +284,7 @@ static void WaylandKeyboardKey(
         case XKB_KEY_a: case XKB_KEY_Left:  Button = InputButton_MoveLeft;      break;
         case XKB_KEY_s: case XKB_KEY_Down:  Button = InputButton_MoveDown;      break;
         case XKB_KEY_d: case XKB_KEY_Right: Button = InputButton_MoveRight;     break;
+        case XKB_KEY_space:                 Button = InputButton_Shoot;         break;
     }
 
     if (Button < InputButton_COUNT)
