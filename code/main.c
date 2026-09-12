@@ -11,11 +11,8 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
-#include <linux/input-event-codes.h>
-#include <wayland-client.h>
-#include <xkbcommon/xkbcommon.h>
-#include "xdg-shell-client.h"
-#include "xdg-shell.c"
+
+#include "wayland.c"
 
 #define VK_USE_PLATFORM_WAYLAND_KHR 1
 #define VK_NO_PROTOTYPES
@@ -25,323 +22,6 @@
 #include "volk.c"
 
 static input Input = {0};
-
-typedef struct
-{
-    struct wl_display*      Display;
-    struct wl_registry*     Registry;
-    struct wl_compositor*   Compositor;
-    struct xdg_wm_base*     XdgWmBase;
-    struct wl_surface*      Surface;
-    struct xdg_surface*     XdgSurface;
-    struct xdg_toplevel*    XdgTopLevel;
-    struct wl_seat*         Seat;
-    struct wl_pointer*      Pointer;
-    struct wl_keyboard*     Keyboard;
-    struct wl_output*       Output;
-
-    struct xkb_context*     XkbContext;
-    struct xkb_keymap*      XkbKeymap;
-    struct xkb_state*       XkbState;
-
-    int                     IsFullscreen;
-    int                     IsResizing;
-    int                     ReadyToResize;
-    int                     HasClosed;
-
-    unsigned int            LastMouseMoveTime;
-} wayland_state;
-
-static wayland_state Wayland = {0};
-
-static void HandleXdgWmBasePing(void* Data, struct xdg_wm_base* XdgWmBase, unsigned int Serial)
-{
-    xdg_wm_base_pong(XdgWmBase, Serial);
-}
-
-static struct xdg_wm_base_listener XdgWmBaseListener =
-{
-    .ping = HandleXdgWmBasePing,
-};
-
-static void HandlePointerEnter(
-    void* Data,
-    struct wl_pointer* Pointer,
-    unsigned int Serial,
-    struct wl_surface* Surface,
-    wl_fixed_t X,
-    wl_fixed_t Y
-)
-{
-}
-
-static void HandlePointerLeave(
-    void* Data,
-    struct wl_pointer* Pointer,
-    unsigned int Serial,
-    struct wl_surface* Surface
-)
-{
-}
-
-static void HandlePointerMotion(
-    void* Data,
-    struct wl_pointer* Pointer,
-    unsigned int Time,
-    wl_fixed_t X,
-    wl_fixed_t Y
-)
-{
-    if (Time > Wayland.LastMouseMoveTime)
-    {
-        Input.MouseX = (float)wl_fixed_to_double(X);
-        Input.MouseY = (float)Input.WindowSizeY - (float)wl_fixed_to_double(Y);
-
-        Wayland.LastMouseMoveTime = Time;
-    }
-}
-
-static void HandlePointerButton(
-    void* Data,
-    struct wl_pointer* Pointer,
-    unsigned int Serial,
-    unsigned int Time,
-    unsigned int Button,
-    unsigned int State
-)
-{
-}
-
-static struct wl_pointer_listener PointerListener =
-{
-    .enter = HandlePointerEnter,
-    .leave = HandlePointerLeave,
-    .motion = HandlePointerMotion,
-    .button = HandlePointerButton,
-};
-
-static void HandleKeyboardKeymap(
-    void* Data,
-    struct wl_keyboard* Keyboard,
-    unsigned int Format,
-    int FileDescriptor,
-    unsigned int Size
-)
-{
-    assert(Format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1);
-
-    char* Keymap = mmap(0, Size, PROT_READ, MAP_PRIVATE, FileDescriptor, 0);
-    assert(Keymap != MAP_FAILED);
-
-    Wayland.XkbContext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-    assert(Wayland.XkbContext);
-
-    Wayland.XkbKeymap = xkb_keymap_new_from_string(Wayland.XkbContext, Keymap, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    assert(Wayland.XkbKeymap);
-
-    Wayland.XkbState = xkb_state_new(Wayland.XkbKeymap);
-    assert(Wayland.XkbState);
-
-    munmap(Keymap, Size);
-    close(FileDescriptor);
-}
-
-static void HandleKeyboardEnter(
-    void* Data,
-    struct wl_keyboard* Keyboard,
-    unsigned int Serial,
-    struct wl_surface* Surface,
-    struct wl_array* Keys
-)
-{
-}
-
-static void HandleKeyboardLeave(
-    void* Data,
-    struct wl_keyboard* Keyboard,
-    unsigned int Serial,
-    struct wl_surface* Surface
-)
-{
-}
-
-static void HandleKeyboardKey(
-    void* Data,
-    struct wl_keyboard* Keyboard,
-    unsigned int Serial,
-    unsigned int Time,
-    unsigned int EvdevScancode,
-    unsigned int State
-)
-{
-    int Pressed = (State == WL_KEYBOARD_KEY_STATE_PRESSED);
-
-    unsigned int XkbScancode = EvdevScancode + 8;
-    xkb_keysym_t Key = xkb_state_key_get_one_sym(Wayland.XkbState, XkbScancode);
-
-    switch (Key)
-    {
-        case XKB_KEY_F11:
-        {
-            if (!Pressed)
-                break;
-
-            if (!Wayland.IsFullscreen)
-                xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
-            else
-                xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
-
-            Wayland.IsFullscreen = !Wayland.IsFullscreen;
-        } break;
-
-        case XKB_KEY_w: case XKB_KEY_Up:        Input.MovePlayerUp      = Pressed; break;
-        case XKB_KEY_a: case XKB_KEY_Left:      Input.MovePlayerLeft    = Pressed; break;
-        case XKB_KEY_s: case XKB_KEY_Down:      Input.MovePlayerDown    = Pressed; break;
-        case XKB_KEY_d: case XKB_KEY_Right:     Input.MovePlayerRight   = Pressed; break;
-        case XKB_KEY_space:                     Input.PlayerShoot       = Pressed; break;
-    }
-}
-
-static void HandleKeyboardModifiers(
-    void* Data,
-    struct wl_keyboard* Keyboard,
-    unsigned int Serial,
-    unsigned int ModifiersDepressed,
-    unsigned int ModifiersLatched,
-    unsigned int ModifiersLocked,
-    unsigned int Group
-)
-{
-    // TODO(vak): Handle modifiers
-}
-
-static struct wl_keyboard_listener KeyboardListener =
-{
-    .keymap = HandleKeyboardKeymap,
-    .enter = HandleKeyboardEnter,
-    .leave = HandleKeyboardLeave,
-    .key = HandleKeyboardKey,
-    .modifiers = HandleKeyboardModifiers,
-};
-
-static void HandleSeatCapabilities(void* Data, struct wl_seat* Seat, unsigned int Capabilities)
-{
-    printf("seat capabilities: ");
-
-    if (Capabilities & WL_SEAT_CAPABILITY_POINTER)
-    {
-        Wayland.Pointer = wl_seat_get_pointer(Seat);
-        assert(Wayland.Pointer);
-
-        wl_pointer_add_listener(Wayland.Pointer, &PointerListener, 0);
-
-        printf("pointer ");
-    }
-
-    if (Capabilities & WL_SEAT_CAPABILITY_KEYBOARD)
-    {
-        Wayland.Keyboard = wl_seat_get_keyboard(Seat);
-        assert(Wayland.Keyboard);
-
-        wl_keyboard_add_listener(Wayland.Keyboard, &KeyboardListener, 0);
-
-        printf("keyboard ");
-    }
-
-    if (Capabilities & WL_SEAT_CAPABILITY_TOUCH)
-        printf("touch ");
-
-    printf("\n");
-}
-
-static struct wl_seat_listener SeatListener =
-{
-    .capabilities = HandleSeatCapabilities,
-};
-
-static void HandleRegistryGlobal(
-    void*                   Data,
-    struct wl_registry*     Registry,
-    unsigned int            Name,
-    const char*             Interface,
-    unsigned int            Version
-)
-{
-    if (strcmp(Interface, wl_compositor_interface.name) == 0)
-    {
-        Wayland.Compositor = wl_registry_bind(Registry, Name, &wl_compositor_interface, 1);
-        assert(Wayland.Compositor);
-    }
-    else if (strcmp(Interface, xdg_wm_base_interface.name) == 0)
-    {
-        Wayland.XdgWmBase = wl_registry_bind(Registry, Name, &xdg_wm_base_interface, 1);
-        assert(Wayland.XdgWmBase);
-
-        xdg_wm_base_add_listener(Wayland.XdgWmBase, &XdgWmBaseListener, 0);
-    }
-    else if (strcmp(Interface, wl_seat_interface.name) == 0)
-    {
-        Wayland.Seat = wl_registry_bind(Registry, Name, &wl_seat_interface, 1);
-        assert(Wayland.Seat);
-
-        wl_seat_add_listener(Wayland.Seat, &SeatListener, 0);
-    }
-    else if (strcmp(Interface, wl_output_interface.name) == 0)
-    {
-        Wayland.Output = wl_registry_bind(Registry, Name, &wl_output_interface, 1);
-        assert(Wayland.Output);
-    }
-}
-
-static struct wl_registry_listener RegistryListener =
-{
-    .global = HandleRegistryGlobal,
-};
-
-static void HandleXdgSurfaceConfigure(void* Data, struct xdg_surface* XdgSurface, unsigned int Serial)
-{
-    xdg_surface_ack_configure(XdgSurface, Serial);
-
-    if (Wayland.IsResizing)
-    {
-        Wayland.ReadyToResize = 1;
-    }
-}
-
-static struct xdg_surface_listener XdgSurfaceListener =
-{
-    .configure = HandleXdgSurfaceConfigure,
-};
-
-static void HandleXdgTopLevelConfigure(
-    void* Data,
-    struct xdg_toplevel* TopLevel,
-    int Width,
-    int Height,
-    struct wl_array* States
-)
-{
-    if ((Width != Input.WindowSizeX) || (Height != Input.WindowSizeY))
-    {
-        Input.WindowSizeX = Width;
-        Input.WindowSizeY = Height;
-        Wayland.IsResizing = 1;
-    }
-}
-
-static void HandleXdgTopLevelClose(
-    void* Data,
-    struct xdg_toplevel* TopLevel
-)
-{
-    Wayland.HasClosed = 1;
-}
-
-static struct xdg_toplevel_listener XdgTopLevelListener =
-{
-    .configure  = HandleXdgTopLevelConfigure,
-    .close      = HandleXdgTopLevelClose,
-};
 
 #define VK_CHECK(VulkanCall) \
     do \
@@ -385,7 +65,9 @@ static void VulkanResizeSwapchain(
     VkDevice            Device,
     VkPhysicalDevice    PhysicalDevice,
     VkSurfaceKHR        Surface,
-    vulkan_swapchain*   Swapchain
+    vulkan_swapchain*   Swapchain,
+    int                 Width,
+    int                 Height
 )
 {
     VK_CHECK(vkDeviceWaitIdle(Device));
@@ -393,9 +75,6 @@ static void VulkanResizeSwapchain(
     VulkanDestroySwapchain(Device, Swapchain);
 
     VkSurfaceCapabilitiesKHR SurfaceCaps = {0};
-
-    // TODO(vak): Investigate why the fuck does SurfaceCaps.currentExtent
-    // get set to {U32Max, U32Max} ??
 
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         PhysicalDevice,
@@ -405,8 +84,8 @@ static void VulkanResizeSwapchain(
 
     int DesiredImageCount = (SurfaceCaps.minImageCount <= 3) ? (3) : (SurfaceCaps.minImageCount);
 
-    Swapchain->Width = Input.WindowSizeX;
-    Swapchain->Height = Input.WindowSizeY;
+    Swapchain->Width = Width;
+    Swapchain->Height = Height;
 
     VkSwapchainCreateInfoKHR SwapchainInfo =
     {
@@ -570,36 +249,12 @@ int main(int ArgCount, char* Args[])
 {
     setvbuf(stdout, 0, _IONBF, 0);
 
-    Wayland.Display = wl_display_connect(0);
-    assert(Wayland.Display);
-
-    Wayland.Registry = wl_display_get_registry(Wayland.Display);
-    assert(Wayland.Display);
-
-    wl_registry_add_listener(Wayland.Registry, &RegistryListener, 0);
-    wl_display_roundtrip(Wayland.Display);
-
-    Wayland.Surface = wl_compositor_create_surface(Wayland.Compositor);
-    assert(Wayland.Surface);
-
-    Wayland.XdgSurface = xdg_wm_base_get_xdg_surface(Wayland.XdgWmBase, Wayland.Surface);
-    assert(Wayland.XdgSurface);
-
-    xdg_surface_add_listener(Wayland.XdgSurface, &XdgSurfaceListener, 0);
-
-    Wayland.XdgTopLevel = xdg_surface_get_toplevel(Wayland.XdgSurface);
-    assert(Wayland.XdgTopLevel);
-
-    xdg_toplevel_add_listener(Wayland.XdgTopLevel, &XdgTopLevelListener, 0);
-
-    xdg_toplevel_set_title(Wayland.XdgTopLevel, "finite");
-    xdg_toplevel_set_app_id(Wayland.XdgTopLevel, "finite");
-
-    wl_surface_commit(Wayland.Surface);
-    wl_display_roundtrip(Wayland.Display);
-    wl_surface_commit(Wayland.Surface);
-
-    printf("Wayland setup good\n");
+    wayland_state Wayland = {0};
+    if (!WaylandSetup(&Wayland))
+    {
+        WaylandShutdown(&Wayland);
+        return (1);
+    }
 
     VK_CHECK(volkInitialize());
 
@@ -1090,12 +745,15 @@ int main(int ArgCount, char* Args[])
     struct timespec FrameBegin = {0};
     clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
 
-    while (!Wayland.HasClosed)
+    while (!Wayland.IsClosed)
     {
         wl_display_roundtrip(Wayland.Display);
 
         if (Wayland.ReadyToResize)
-            VulkanResizeSwapchain(Device, PhysicalDevice, Surface, &Swapchain);
+            VulkanResizeSwapchain(Device, PhysicalDevice, Surface, &Swapchain, Wayland.Width, Wayland.Height);
+
+        Input.WindowSizeX = Swapchain.Width;
+        Input.WindowSizeY = Swapchain.Height;
 
         render_batch RenderBatch = {0};
 
@@ -1330,17 +988,7 @@ int main(int ArgCount, char* Args[])
     vkDestroySurfaceKHR(Instance, Surface, 0);
     vkDestroyInstance(Instance, 0);
 
-    xdg_toplevel_destroy(Wayland.XdgTopLevel);
-    xdg_surface_destroy(Wayland.XdgSurface);
-    wl_output_release(Wayland.Output);
-    wl_surface_destroy(Wayland.Surface);
-    wl_keyboard_release(Wayland.Keyboard);
-    wl_pointer_release(Wayland.Pointer);
-    wl_seat_destroy(Wayland.Seat);
-    xdg_wm_base_destroy(Wayland.XdgWmBase);
-    wl_compositor_destroy(Wayland.Compositor);
-    wl_registry_destroy(Wayland.Registry);
-    wl_display_disconnect(Wayland.Display);
+    WaylandShutdown(&Wayland);
+
     return (0);
 }
-
