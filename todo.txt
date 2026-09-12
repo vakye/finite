@@ -66,9 +66,10 @@
 
 [Math Library]
 
-    [ ] - Vectors
-    [ ] - Matrices
-    [ ] - Rectangles
+    [x] - Vectors
+    [x] - Matrices
+    [x] - Rectangles
+    [x] - sqrt
     [ ] - Sin, Cos, Tan
     [ ] - Exp, Ln
 
