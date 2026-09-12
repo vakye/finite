@@ -43,10 +43,7 @@ static void RenderWorld(
     {
         camera* Camera = &World->Camera;
 
-        v2 ViewCenter   = Camera->ViewCenter;
-        v2 ViewSize     = CameraGetViewSize(Camera);
-
-        PushOrthographic2D(Spec, Batch, R2CenterSize(ViewCenter, ViewSize));
+        PushOrthographic2D(Spec, Batch, CameraGetViewRect(Camera));
     }
 
     {

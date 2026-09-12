@@ -122,6 +122,15 @@ static v2 CameraGetViewSize(camera* Camera)
     return (Result);
 }
 
+static rect2 CameraGetViewRect(camera* Camera)
+{
+    v2 ViewCenter   = Camera->ViewCenter;
+    v2 ViewSize     = CameraGetViewSize(Camera);
+    rect2 ViewRect  = R2CenterSize(ViewCenter, ViewSize);
+
+    return (ViewRect);
+}
+
 static enemy* GrabDeadEnemySlot(world* World)
 {
     enemy* Enemy = 0;
@@ -266,10 +275,7 @@ static void UpdateWorld(
 
     {
         camera* Camera = &World->Camera;
-
-        v2 ViewCenter   = Camera->ViewCenter;
-        v2 ViewSize     = CameraGetViewSize(Camera);
-        rect2 ViewRect  = R2CenterSize(ViewCenter, ViewSize);
+        rect2 ViewRect = CameraGetViewRect(Camera);
 
         for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
         {
