@@ -5,8 +5,14 @@
 
 typedef struct wayland_state wayland_state;
 
-static int WaylandSetup(wayland_state* Wayland);
-static void WaylandShutdown(wayland_state* Wayland);
+static int          WaylandSetup(wayland_state* Wayland);
+static void         WaylandShutdown(wayland_state* Wayland);
+static int          WaylandIsClosed(wayland_state* Wayland);
+static int          WaylandShouldResize(wayland_state* Wayland);
+static unsigned int WaylandGetWidth(wayland_state* Wayland);
+static unsigned int WaylandGetHeight(wayland_state* Wayland);
+static void         WaylandPollEvents(wayland_state* Wayland);
+static void         WaylandPresent(wayland_state* Wayland);
 
 // NOTE(vak): Implementation
 
@@ -15,7 +21,7 @@ static void WaylandShutdown(wayland_state* Wayland);
 #include "xdg-shell-client.h"
 #include "xdg-shell.c"
 
-typedef struct wayland_state
+struct wayland_state
 {
     struct wl_display*      Display;
     struct wl_registry*     Registry;
@@ -39,7 +45,78 @@ typedef struct wayland_state
     int                     IsResizing;
     int                     ReadyToResize;
     int                     Width, Height;
-} wayland_state;
+};
+
+static int WaylandConnectDisplay    (wayland_state* Wayland);
+static int WaylandGetRegistry       (wayland_state* Wayland);
+static int WaylandCreateSurface     (wayland_state* Wayland);
+static int WaylandGetXdgSurface     (wayland_state* Wayland);
+static int WaylandGetXdgTopLevel    (wayland_state* Wayland);
+static int WaylandNotifyServerDone  (wayland_state* Wayland);
+
+static int WaylandSetup(wayland_state* Wayland)
+{
+    memset(Wayland, 0, sizeof(wayland_state));
+
+    if (!WaylandConnectDisplay(Wayland))            return (0);
+    if (!WaylandGetRegistry(Wayland))               return (0);
+    if (!WaylandCreateSurface(Wayland))             return (0);
+    if (!WaylandGetXdgSurface(Wayland))             return (0);
+    if (!WaylandGetXdgTopLevel(Wayland))            return (0);
+    if (!WaylandNotifyServerDone(Wayland))          return (0);
+
+    return (1);
+}
+
+static void WaylandShutdown(wayland_state* Wayland)
+{
+    if (Wayland->XdgTopLevel)   xdg_toplevel_destroy(Wayland->XdgTopLevel);
+    if (Wayland->XdgSurface)    xdg_surface_destroy(Wayland->XdgSurface);
+    if (Wayland->Surface)       wl_surface_destroy(Wayland->Surface);
+
+    if (Wayland->Keyboard)      wl_keyboard_release(Wayland->Keyboard);
+    if (Wayland->Pointer)       wl_pointer_release(Wayland->Pointer);
+
+    if (Wayland->Output)        wl_output_release(Wayland->Output);
+    if (Wayland->Seat)          wl_seat_destroy(Wayland->Seat);
+    if (Wayland->XdgWmBase)     xdg_wm_base_destroy(Wayland->XdgWmBase);
+    if (Wayland->Compositor)    wl_compositor_destroy(Wayland->Compositor);
+
+    if (Wayland->Registry)      wl_registry_destroy(Wayland->Registry);
+    if (Wayland->Display)       wl_display_disconnect(Wayland->Display);
+
+    memset(Wayland, 0, sizeof(wayland_state));
+}
+
+static int WaylandIsClosed(wayland_state* Wayland)
+{
+    return (Wayland->IsClosed);
+}
+
+static int WaylandShouldResize(wayland_state* Wayland)
+{
+    return (Wayland->ReadyToResize);
+}
+
+static unsigned int WaylandGetWidth(wayland_state* Wayland)
+{
+    return Maximum(0, Wayland->Width);
+}
+
+static unsigned int WaylandGetHeight(wayland_state* Wayland)
+{
+    return Maximum(0, Wayland->Height);
+}
+
+static void WaylandPollEvents(wayland_state* Wayland)
+{
+    wl_display_roundtrip(Wayland->Display);
+}
+
+static void WaylandPresent(wayland_state* Wayland)
+{
+    wl_surface_commit(Wayland->Surface);
+}
 
 static void WaylandError(char* Message)
 {
@@ -227,6 +304,9 @@ static void WaylandHandleRegistryGlobal(
     else if (strcmp(Interface, xdg_wm_base_interface.name) == 0)
     {
         Wayland->XdgWmBase = wl_registry_bind(Registry, Name, &xdg_wm_base_interface, 1);
+
+        if (Wayland->XdgWmBase)
+            xdg_wm_base_add_listener(Wayland->XdgWmBase, &WaylandXdgWmBaseListener, Wayland);
     }
     else if (strcmp(Interface, wl_seat_interface.name) == 0)
     {
@@ -282,7 +362,7 @@ static void WaylandXdgTopLevelConfigure(
     {
         Wayland->Width      = Width;
         Wayland->Height     = Height;
-        Wayland->IsResizing = 1;
+        Wayland->IsResizing = true;
     }
 }
 
@@ -292,7 +372,7 @@ static void WaylandXdgTopLevelClose(
 )
 {
     wayland_state* Wayland = (wayland_state*)Data;
-    Wayland->IsClosed = 1;
+    Wayland->IsClosed = true;
 }
 
 static struct xdg_toplevel_listener WaylandXdgTopLevelListener =
@@ -303,103 +383,94 @@ static struct xdg_toplevel_listener WaylandXdgTopLevelListener =
 
 // NOTE(vak): Main code
 
-static int WaylandSetup(wayland_state* Wayland)
+static int WaylandConnectDisplay(wayland_state* Wayland)
 {
-    // NOTE(vak): Display
+    Wayland->Display = wl_display_connect(0);
+    if (!Wayland->Display)
     {
-        Wayland->Display = wl_display_connect(0);
-        if (!Wayland->Display)
-        {
-            WaylandError("failed to connect to display");
-            return (0);
-        }
-    }
-
-    // NOTE(vak): Registry
-    {
-        Wayland->Registry = wl_display_get_registry(Wayland->Display);
-        if (!Wayland->Registry)
-        {
-            WaylandError("failed to get wl_registry");
-            return (0);
-        }
-
-        wl_registry_add_listener(Wayland->Registry, &WaylandRegistryListener, Wayland);
-        wl_display_roundtrip(Wayland->Display);
-
-        int NotOkay =
-            (Wayland->Compositor    == 0) ||
-            (Wayland->XdgWmBase     == 0) ||
-            (Wayland->Seat          == 0) ||
-            (Wayland->Output        == 0);
-
-        if (!Wayland->Compositor)   WaylandError("failed to register wl_compositor");
-        if (!Wayland->XdgWmBase)    WaylandError("failed to register xdg_wm_base");
-        if (!Wayland->Seat)         WaylandError("failed to register wl_seat");
-        if (!Wayland->Output)       WaylandError("failed to register wl_output");
-
-        if (NotOkay)
-            return (0);
-    }
-
-    // NOTE(vak): Surface
-    {
-        Wayland->Surface = wl_compositor_create_surface(Wayland->Compositor);
-        if (!Wayland->Surface)
-        {
-            WaylandError("failed to create wl_surface");
-            return (0);
-        }
-    }
-
-    // NOTE(vak): XDG surface
-    {
-        Wayland->XdgSurface = xdg_wm_base_get_xdg_surface(Wayland->XdgWmBase, Wayland->Surface);
-        if (!Wayland->XdgSurface)
-        {
-            WaylandError("failed to get xdg_surface from xdg_wm_base");
-            return (0);
-        }
-
-        xdg_surface_add_listener(Wayland->XdgSurface, &WaylandXdgSurfaceListener, Wayland);
-    }
-
-    // NOTE(vak): XDG top level
-    {
-        Wayland->XdgTopLevel = xdg_surface_get_toplevel(Wayland->XdgSurface);
-        if (!Wayland->XdgTopLevel)
-        {
-            WaylandError("failed to get xdg_toplevel from xdg_surface");
-            return (0);
-        }
-
-        xdg_toplevel_add_listener(Wayland->XdgTopLevel, &WaylandXdgTopLevelListener, Wayland);
-        xdg_toplevel_set_title(Wayland->XdgTopLevel, "finite");
-        xdg_toplevel_set_app_id(Wayland->XdgTopLevel, "finite");
-    }
-
-    // NOTE(vak): Notify server that setup is done
-    {
-        wl_surface_commit(Wayland->Surface);
-        wl_display_roundtrip(Wayland->Display);
-        wl_surface_commit(Wayland->Surface);
+        WaylandError("failed to connect to display");
+        return (0);
     }
 
     return (1);
 }
 
-static void WaylandShutdown(wayland_state* Wayland)
+static int WaylandGetRegistry(wayland_state* Wayland)
 {
-    if (Wayland->XdgTopLevel)   xdg_toplevel_destroy(Wayland->XdgTopLevel);
-    if (Wayland->XdgSurface)    xdg_surface_destroy(Wayland->XdgSurface);
-    if (Wayland->Output)        wl_output_release(Wayland->Output);
-    if (Wayland->Surface)       wl_surface_destroy(Wayland->Surface);
-    if (Wayland->Keyboard)      wl_keyboard_release(Wayland->Keyboard);
-    if (Wayland->Pointer)       wl_pointer_release(Wayland->Pointer);
-    if (Wayland->Seat)          wl_seat_destroy(Wayland->Seat);
-    if (Wayland->XdgWmBase)     xdg_wm_base_destroy(Wayland->XdgWmBase);
-    if (Wayland->Compositor)    wl_compositor_destroy(Wayland->Compositor);
-    if (Wayland->Registry)      wl_registry_destroy(Wayland->Registry);
-    if (Wayland->Display)       wl_display_disconnect(Wayland->Display);
+    Wayland->Registry = wl_display_get_registry(Wayland->Display);
+    if (!Wayland->Registry)
+    {
+        WaylandError("failed to get wl_registry");
+        return (0);
+    }
+
+    wl_registry_add_listener(Wayland->Registry, &WaylandRegistryListener, Wayland);
+    wl_display_roundtrip(Wayland->Display);
+
+    int NotOkay =
+        (Wayland->Compositor    == 0) ||
+        (Wayland->XdgWmBase     == 0) ||
+        (Wayland->Seat          == 0) ||
+        (Wayland->Output        == 0);
+
+    if (!Wayland->Compositor)   WaylandError("failed to register wl_compositor");
+    if (!Wayland->XdgWmBase)    WaylandError("failed to register xdg_wm_base");
+    if (!Wayland->Seat)         WaylandError("failed to register wl_seat");
+    if (!Wayland->Output)       WaylandError("failed to register wl_output");
+
+    int Okay = !NotOkay;
+
+    return (Okay);
+}
+
+static int WaylandCreateSurface(wayland_state* Wayland)
+{
+    Wayland->Surface = wl_compositor_create_surface(Wayland->Compositor);
+    if (!Wayland->Surface)
+    {
+        WaylandError("failed to create wl_surface");
+        return (0);
+    }
+
+    return (1);
+}
+
+static int WaylandGetXdgSurface(wayland_state* Wayland)
+{
+    Wayland->XdgSurface = xdg_wm_base_get_xdg_surface(Wayland->XdgWmBase, Wayland->Surface);
+    if (!Wayland->XdgSurface)
+    {
+        WaylandError("failed to get xdg_surface from xdg_wm_base");
+        return (0);
+    }
+
+    xdg_surface_add_listener(Wayland->XdgSurface, &WaylandXdgSurfaceListener, Wayland);
+
+    return (1);
+}
+
+static int WaylandGetXdgTopLevel(wayland_state* Wayland)
+{
+    Wayland->XdgTopLevel = xdg_surface_get_toplevel(Wayland->XdgSurface);
+    if (!Wayland->XdgTopLevel)
+    {
+        WaylandError("failed to get xdg_toplevel from xdg_surface");
+        return (0);
+    }
+
+    xdg_toplevel_add_listener(Wayland->XdgTopLevel, &WaylandXdgTopLevelListener, Wayland);
+    xdg_toplevel_set_title(Wayland->XdgTopLevel, "finite");
+    xdg_toplevel_set_app_id(Wayland->XdgTopLevel, "finite");
+
+    return (1);
+}
+
+static int WaylandNotifyServerDone(wayland_state* Wayland)
+{
+    wl_surface_commit(Wayland->Surface);
+    wl_display_roundtrip(Wayland->Display);
+    wl_surface_commit(Wayland->Surface);
+
+    return (1);
 }
 

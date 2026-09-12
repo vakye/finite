@@ -8,3 +8,6 @@
 
 #define U32Max (~0U)
 
+#define true  (1)
+#define false (0)
+
