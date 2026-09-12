@@ -27,9 +27,9 @@
 
 [Components]
 
-    [ ] - Physics Body (Position, Velocity, Acceleration, Size)
+    [ ] - Body (Position, Velocity, Acceleration, Size)
     [ ] - Timer (Cooldown, ...)
-    [ ] - Render element (Colored rectangle, sprite, ...) 
+    [ ] - Sprite (Colored rectangle, texture, ...) 
 
 [Art]
 
@@ -81,8 +81,8 @@
 
 [Architecture]
 
-    [+] - Seperate Wayland graphical/input backend
-    [ ] - Seperate Vulkan renderer backend
+    [x] - Seperate Wayland graphical/input backend
+    [x] - Seperate Vulkan renderer backend
     [ ] - Unified platform struct
 
 [Graphics Backend]
