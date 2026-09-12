@@ -92,17 +92,6 @@ static void RenderWorld(
     }
 
     {
-        player* Player = &World->Player;
-
-        PushRect(
-            Spec, Batch,
-            Player->X, Player->Y,
-            Player->SizeX, Player->SizeY,
-            1.0f, 0.8f, 0.5f, 1.0f
-        );
-    }
-
-    {
         for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
         {
             bullet* Bullet = World->Bullets + Index;
@@ -114,6 +103,33 @@ static void RenderWorld(
                 Bullet->X, Bullet->Y,
                 Bullet->SizeX, Bullet->SizeY,
                 1.0f, 0.2f, 0.2f, 1.0f
+            );
+        }
+    }
+
+    {
+        player* Player = &World->Player;
+
+        PushRect(
+            Spec, Batch,
+            Player->X, Player->Y,
+            Player->SizeX, Player->SizeY,
+            1.0f, 0.8f, 0.5f, 1.0f
+        );
+    }
+
+    {
+        for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Enemies); Index++)
+        {
+            enemy* Enemy = World->Enemies + Index;
+            if (!Enemy->Live)
+                continue;
+
+            PushRect(
+                Spec, Batch,
+                Enemy->X, Enemy->Y,
+                Enemy->SizeX, Enemy->SizeY,
+                0.2f, 0.3f, 0.9f, 1.0f
             );
         }
     }

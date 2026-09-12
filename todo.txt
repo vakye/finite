@@ -19,9 +19,9 @@
 
 [Enemies]
 
-    [ ] - Spawn enemies
+    [x] - Spawn enemies
     [ ] - Enemy take damage
-    [ ] - Enemy fire bullets
+    [x] - Enemy fire bullets
     [ ] - Enemy drop power up by chance upon death
     [ ] - Enemy yields money upon death
 
