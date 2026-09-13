@@ -1,24 +1,6 @@
 
 #pragma once
 
-static float Square(float X)
-{
-    float Result = X*X;
-    return (Result);
-}
-
-static float SquareRoot(float X)
-{
-    float Result = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(X)));
-    return (Result);
-}
-
-static float InvSquareRoot(float X)
-{
-    float Result = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(X)));
-    return (Result);
-}
-
 typedef union
 {
     struct { float X, Y; };
@@ -163,7 +145,7 @@ static v2 R2GetSize(rect2 Rect)
     return (Result);
 }
 
-static int R2Intersect(rect2 A, rect2 B)
+static int R2Intersects(rect2 A, rect2 B)
 {
     int IsOutside =
         (A.Min.X > B.Max.X) ||

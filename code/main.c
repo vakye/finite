@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 #include "shared.c"
+#include "intrinsics.c"
+#include "random.c"
 #include "math.c"
 #include "update.c"
 #include "render.c"

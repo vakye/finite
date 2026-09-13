@@ -13,6 +13,7 @@
 
     [x] - Move player around
     [x] - Player shoot attack
+    [x] - Player health bar
     [ ] - Player slash attack
     [ ] - Upgrades
     [ ] - Equipment
@@ -20,7 +21,8 @@
 [Enemies]
 
     [x] - Spawn enemies
-    [ ] - Enemy take damage
+    [x] - Enemy take damage
+    [x] - Enemy health bar
     [x] - Enemy fire bullets
     [ ] - Enemy drop power up by chance upon death
     [ ] - Enemy yields money upon death

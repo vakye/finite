@@ -1,38 +1,8 @@
 
-typedef struct
-{
-    unsigned long long State;
-} random_state;
-
-static unsigned int RotateRight32(unsigned int Value, unsigned int Shift)
-{
-	unsigned int Result = (Value >> Shift) | (Value << (-Shift & 31));
-    return (Result);
-}
-
-static unsigned int RandomU32(random_state* Entropy)
-{
-    unsigned long long X = Entropy->State;
-    unsigned int Count = (unsigned int)(X >> 59);
-
-    Entropy->State = X * 6364136223846793005u + 1442695040888963407u;
-    X ^= (X >> 18);
-
-    unsigned int Result = RotateRight32((unsigned int)(X >> 27), Count);
-    return (Result);
-}
-
-static float RandomUnilateral(random_state* Entropy)
-{
-    float Result = (float)RandomU32(Entropy) / (float)U32Max;
-    return (Result);
-}
-
-static float RandomBilateral(random_state* Entropy)
-{
-    float Result = -1.0f + 2.0f*RandomUnilateral(Entropy);
-    return (Result);
-}
+#define PLAYER_BULLET_SEEKING       (1)
+#define PLAYER_BULLET_SPRAY         (1)
+#define PLAYER_BULLET_TRIPLESHOT    (1)
+#define PLAYER_BULLET_PENTASHOT     (1)
 
 typedef enum
 {
@@ -71,6 +41,8 @@ typedef struct
 
 typedef struct
 {
+    float   Health;
+    float   MaxHealth;
     v2      P;
     v2      DP;
     v2      Size;
@@ -88,6 +60,7 @@ typedef struct
 {
     int     Live;
     int     ShotByEnemy;
+    float   Damage;
     v2      P;
     v2      DP;
     v2      DDP;
@@ -97,6 +70,8 @@ typedef struct
 typedef struct
 {
     int     Live;
+    float   Health;
+    float   MaxHealth;
     v2      P;
     v2      DP;
     v2      Size;
@@ -108,7 +83,7 @@ typedef struct
     random_state    Entropy;
     player          Player;
     camera          Camera;
-    bullet          Bullets[128];
+    bullet          Bullets[512];
     enemy           Enemies[128];
 } world;
 
@@ -155,6 +130,8 @@ static void SpawnEnemy(world* World)
         return;
 
     Enemy->Live = 1;
+    Enemy->MaxHealth = 100.0f + 20.0f*RandomBilateral(&World->Entropy);
+    Enemy->Health = Enemy->MaxHealth;
 
     Enemy->P = V2(
         7.0f*RandomBilateral(&World->Entropy),
@@ -183,8 +160,10 @@ static void SetupWorld(world* World)
     {
         player* Player = &World->Player;
 
-        Player->P       = V2(0.0f, -6.5f);
-        Player->Size    = V2(0.6f, 0.3f);
+        Player->P           = V2(0.0f, -6.5f);
+        Player->Size        = V2(0.6f, 0.3f);
+        Player->MaxHealth   = 150;
+        Player->Health      = Player->MaxHealth;
     }
 
     {
@@ -210,11 +189,8 @@ static bullet* GrabDeadBulletSlot(world* World)
     return (Bullet);
 }
 
-static void PlayerTryShootBullet(world* World, player* Player)
+static void PlayerShootBullet(world* World, player* Player)
 {
-    if (Player->ShootCooldown > 0.0f)
-        return;
-
     bullet* Bullet = GrabDeadBulletSlot(World);
     if (!Bullet)
         return;
@@ -222,6 +198,7 @@ static void PlayerTryShootBullet(world* World, player* Player)
     memset(Bullet, 0, sizeof(bullet));
 
     Bullet->Live = 1;
+    Bullet->Damage = 20;
 
     Bullet->Size = V2(0.075f, 0.5f);
     Bullet->P = V2(
@@ -231,6 +208,28 @@ static void PlayerTryShootBullet(world* World, player* Player)
 
     Bullet->DP = V2(0.0f, 10.0f);
     Bullet->DDP = V2(0.0f, 30.0f);
+
+#if PLAYER_BULLET_SPRAY
+    Bullet->DP.X += 3.0f*RandomBilateral(&World->Entropy);
+#endif
+}
+
+static void PlayerTryShootBullet(world* World, player* Player)
+{
+    if (Player->ShootCooldown > 0.0f)
+        return;
+
+    PlayerShootBullet(World, Player);
+
+#if PLAYER_BULLET_PENTASHOT
+    PlayerShootBullet(World, Player);
+    PlayerShootBullet(World, Player);
+    PlayerShootBullet(World, Player);
+    PlayerShootBullet(World, Player);
+#elif PLAYER_BULLET_TRIPLESHOT
+    PlayerShootBullet(World, Player);
+    PlayerShootBullet(World, Player);
+#endif
 
     Player->ShootCooldown = 0.12f;
 }
@@ -248,6 +247,7 @@ static void EnemyTryShootBullet(world* World, enemy* Enemy)
 
     Bullet->Live = 1;
     Bullet->ShotByEnemy = 1;
+    Bullet->Damage = 20;
 
     Bullet->Size = V2(0.1f, 0.1f);
     Bullet->P = V2(
@@ -259,6 +259,15 @@ static void EnemyTryShootBullet(world* World, enemy* Enemy)
     Bullet->DDP = V2(0.0f, -10.0f);
 
     Enemy->ShootCooldown = 1.0f + 1.0f*RandomUnilateral(&World->Entropy);
+}
+
+static void OnBulletHitEnemy(world* World, enemy* Enemy, bullet* Bullet)
+{
+    Bullet->Live = 0;
+    Enemy->Health -= Bullet->Damage;
+
+    if (Enemy->Health <= 0)
+        Enemy->Live = 0;
 }
 
 static void UpdateWorld(
@@ -285,7 +294,7 @@ static void UpdateWorld(
 
             rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
 
-            if (!R2Intersect(BulletRect, ViewRect))
+            if (!R2Intersects(BulletRect, ViewRect))
                 Bullet->Live = 0;
         }
     }
@@ -340,6 +349,47 @@ static void UpdateWorld(
         }
     }
 
+#if PLAYER_BULLET_SEEKING
+    {
+        for (unsigned int BulletIndex = 0; BulletIndex < ARRAY_COUNT(World->Bullets); BulletIndex++)
+        {
+            bullet* Bullet = World->Bullets + BulletIndex;
+
+            if (!Bullet->Live)
+                continue;
+
+            if (Bullet->ShotByEnemy)
+                continue;
+
+            enemy* ClosestEnemy = 0;
+            float MinDistanceX = 1000000000000000.0f;
+
+            for (unsigned int EnemyIndex = 0; EnemyIndex < ARRAY_COUNT(World->Enemies); EnemyIndex++)
+            {
+                enemy* Enemy = World->Enemies + EnemyIndex;
+
+                if (!Enemy->Live)
+                    continue;
+
+                float DeltaX = Enemy->P.X - Bullet->P.X;
+                float DistanceX = Absolute(DeltaX);
+
+                if (DistanceX < MinDistanceX)
+                {
+                    ClosestEnemy = Enemy;
+                    MinDistanceX = DistanceX;
+                    break;
+                }
+            }
+
+            if (ClosestEnemy)
+                Bullet->DDP.X = (ClosestEnemy->P.X - Bullet->P.X);
+            else
+                Bullet->DDP.X = 0.0f;
+        }
+    }
+#endif
+
     {
         for (unsigned int Index = 0; Index < ARRAY_COUNT(World->Bullets); Index++)
         {
@@ -356,6 +406,33 @@ static void UpdateWorld(
 
             Bullet->DP = V2Add(Bullet->DP, V2MulScalar(Bullet->DDP, Platform->DeltaTime));
             Bullet->P  = V2Add(Bullet->P,  V2MulScalar(Bullet->DP,  Platform->DeltaTime));
+        }
+    }
+
+    {
+        for (unsigned int EnemyIndex = 0; EnemyIndex < ARRAY_COUNT(World->Enemies); EnemyIndex++)
+        {
+            enemy* Enemy = World->Enemies + EnemyIndex;
+
+            if (!Enemy->Live)
+                continue;
+
+            for (unsigned int BulletIndex = 0; BulletIndex < ARRAY_COUNT(World->Bullets); BulletIndex++)
+            {
+                bullet* Bullet = World->Bullets + BulletIndex;
+
+                if (!Bullet->Live)
+                    continue;
+
+                if (Bullet->ShotByEnemy)
+                    continue;
+
+                rect2 EnemyRect  = R2CenterSize(Enemy->P,  Enemy->Size);
+                rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
+
+                if (R2Intersects(EnemyRect, BulletRect))
+                    OnBulletHitEnemy(World, Enemy, Bullet);
+            }
         }
     }
 }

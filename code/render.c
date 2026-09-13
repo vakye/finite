@@ -61,6 +61,18 @@ static void RenderWorld(
         player* Player = &World->Player;
 
         PushRect(Spec, Batch, R2CenterSize(Player->P, Player->Size), V4(1.0f, 0.8f, 0.5f, 1.0f));
+
+        v2 HealthBarSize        = V2(0.6f, 0.1f);
+        v2 HealthBarOffset      = V2(0.0f, Player->Size.Y + 0.5f*HealthBarSize.Y);
+        v2 HealthBarP           = V2Add(Player->P, HealthBarOffset);
+
+        float HealthT           = Player->Health / Player->MaxHealth;
+        v2 HealthSize           = V2(HealthBarSize.X * HealthT, HealthBarSize.Y);
+        v2 HealthMin            = V2Sub(HealthBarP, V2ScalarMul(0.5f, HealthBarSize));
+
+        PushRect(Spec, Batch, R2CenterSize  (HealthBarP, HealthBarSize),    V4(0.2f, 0.4f, 0.6f, 1.0f));
+        PushRect(Spec, Batch, R2MinSize     (HealthMin , HealthSize),       V4(0.2f, 0.4f, 0.8f, 1.0f));
+
     }
 
     {
@@ -71,6 +83,17 @@ static void RenderWorld(
                 continue;
 
             PushRect(Spec, Batch, R2CenterSize(Enemy->P, Enemy->Size), V4(0.2f, 0.3f, 0.9f, 1.0f));
+
+            v2 HealthBarSize        = V2(0.5f, 0.1f);
+            v2 HealthBarOffset      = V2(0.0f, Enemy->Size.Y + 0.5f*HealthBarSize.Y);
+            v2 HealthBarP           = V2Add(Enemy->P, HealthBarOffset);
+
+            float HealthT           = Enemy->Health / Enemy->MaxHealth;
+            v2 HealthSize           = V2(HealthBarSize.X * HealthT, HealthBarSize.Y);
+            v2 HealthMin            = V2Sub(HealthBarP, V2ScalarMul(0.5f, HealthBarSize));
+
+            PushRect(Spec, Batch, R2CenterSize  (HealthBarP, HealthBarSize),    V4(0.6f, 0.2f, 0.2f, 1.0f));
+            PushRect(Spec, Batch, R2MinSize     (HealthMin , HealthSize),       V4(0.8f, 0.2f, 0.2f, 1.0f));
         }
     }
 }
