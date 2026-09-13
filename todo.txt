@@ -29,9 +29,10 @@
 
 [Components]
 
-    [ ] - Body (Position, Velocity, Acceleration, Size)
-    [ ] - Timer (Cooldown, ...)
-    [ ] - Sprite (Colored rectangle, texture, ...) 
+    [+] - Body (Position, Velocity, Acceleration)
+    [+] - Timer (Cooldown)
+    [+] - Sprite (Colored rectangle)
+    [+] - Health (Current health, max health) 
 
 [Art]
 

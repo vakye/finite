@@ -52,7 +52,12 @@ int main(int ArgCount, char* Args[])
 
     world World = {0};
     {
-        SetupWorld(&World);
+        struct timespec Now = {0};
+        clock_gettime(CLOCK_MONOTONIC, &Now);
+
+        size_t RandomSeed = Now.tv_nsec;
+
+        SetupWorld(&World, RandomSeed);
     }
 
     platform Platform = {0};
