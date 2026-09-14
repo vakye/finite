@@ -270,9 +270,10 @@ static b32 VulkanResize(u32 Width, u32 Height)
 
 static b32 VulkanRender(void)
 {
-#if 0
+    render_batch Batch = RenderGetBatch();
+
     usize MaxVertexCount = Vulkan.VertexBuffer.Size / sizeof(vulkan_vertex);
-    usize VerticesNeeded = Batch->RectCount * 6;
+    usize VerticesNeeded = Batch.RectCount * 6;
 
     if (MaxVertexCount < VerticesNeeded)
     {
@@ -282,9 +283,9 @@ static b32 VulkanRender(void)
 
     u32 VertexCount = 0;
 
-    for (u32 RectIndex = 0; RectIndex < Batch->RectCount; RectIndex++)
+    for (u32 RectIndex = 0; RectIndex < Batch.RectCount; RectIndex++)
     {
-        render_rect* RenderRect = Spec->Rects + RectIndex;
+        render_rect* RenderRect = Batch.Rects + RectIndex;
 
         v2 Min = RenderRect->Rect.Min;
         v2 Max = RenderRect->Rect.Max;
@@ -304,12 +305,8 @@ static b32 VulkanRender(void)
 
     vulkan_push_constants PushConstants =
     {
-        .Projection = Batch->Projection,
+        .Projection = Batch.Projection,
     };
-#endif
-
-    u32 VertexCount = 0;
-    vulkan_push_constants PushConstants = {0};
 
     u32 ImageIndex = 0;
 

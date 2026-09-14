@@ -24,6 +24,8 @@ typedef u32 b32;
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
+#define Assert(Expression) if (!(Expression)) __builtin_trap()
+
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))
 #define Maximum(A, B) ((A) > (B) ? (A) : (B))
 

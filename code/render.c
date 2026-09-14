@@ -1,4 +1,8 @@
 
+#pragma once
+
+// NOTE(vak): Cheatsheet
+
 typedef struct
 {
     rect2   Rect;
@@ -7,56 +11,56 @@ typedef struct
 
 typedef struct
 {
-    unsigned int    MaxRectCount;
+    m4x4            Projection;
     render_rect*    Rects;
-} render_spec;
+    usize           RectCount;
+} render_batch;
+
+static void         RenderPrepareForFrame   (void);
+static void         RenderOrthographic2D    (rect2 ViewRect);
+static void         RenderRect              (rect2 Rect, v4 Color);
+static render_batch RenderGetBatch          (void);
+
+// NOTE(vak): Implementation
 
 typedef struct
 {
-    m4x4            Projection;
-    unsigned int    RectCount;
-} render_batch;
+    m4x4        Projection;
+    usize       RectCount;
+    render_rect Rects[65536];
+} render_state;
 
-static void PushOrthographic2D(render_spec* Spec, render_batch* Batch, rect2 ViewRect)
+static render_state Render = {0};
+
+static void RenderPrepareForFrame(void)
 {
-    Batch->Projection = M4x4Orthographic2D(ViewRect);
+    Render.RectCount = 0;
 }
 
-static void PushRect(render_spec* Spec, render_batch* Batch, rect2 Rect, v4 Color)
+static void RenderOrthographic2D(rect2 ViewRect)
 {
-    assert(Batch->RectCount < Spec->MaxRectCount);
+    Render.Projection = M4x4Orthographic2D(ViewRect);
+}
 
-    render_rect* RenderRect = Spec->Rects + Batch->RectCount++;
+static void RenderRect(rect2 Rect, v4 Color)
+{
+    Assert(Render.RectCount < ArrayCount(Render.Rects));
 
-    RenderRect->Rect = Rect;
+    render_rect* RenderRect = Render.Rects + Render.RectCount++;
+
+    RenderRect->Rect  = Rect;
     RenderRect->Color = Color;
 }
 
-static void RenderWorld(
-    world*          World,  // NOTE(vak): Input
-    render_spec*    Spec,   // NOTE(vak): Input
-    render_batch*   Batch   // NOTE(vak): Output
-)
+static render_batch RenderGetBatch(void)
 {
-    memset(Batch, 0, sizeof(render_batch));
-
-    components* Components = &World->Components;
-    camera* Camera = &World->Camera;
-
-    PushOrthographic2D(Spec, Batch, CameraGetViewRect(Camera));
-
-    for (sprite_id SpriteID = 1; SpriteID <= Components->SpriteSet.Count; SpriteID++)
+    render_batch Batch =
     {
-        if (!SparseSetIsSlotUsed(&Components->SpriteSet, SpriteID))
-            continue;
+        .Projection = Render.Projection,
+        .RectCount  = Render.RectCount,
+        .Rects      = Render.Rects,
+    };
 
-        sprite* Sprite  = ComponentGetSprite(Components, SpriteID);
-        body*   Body    = ComponentGetBody  (Components, Sprite->AttachedToBodyID);
-
-        v2 Center   = V2Add(Body->P, Sprite->Offset);
-        v2 Size     = Sprite->Size;
-
-        PushRect(Spec, Batch, R2CenterSize(Center, Size), Sprite->Color);
-    }
+    return (Batch);
 }
 

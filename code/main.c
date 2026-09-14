@@ -9,6 +9,7 @@
 #include "random.c"
 #include "math.c"
 #include "input.c"
+#include "render.c"
 
 #include <sys/mman.h>
 #include <time.h>
@@ -43,13 +44,17 @@ s32 main(s32 ArgCount, char* Args[])
     while (!WaylandIsClosed())
     {
         InputPrepareForFrame();
+        RenderPrepareForFrame();
+
         WaylandPollEvents();
 
         if (WaylandShouldResize())
-        {
             if (!VulkanResize(WaylandGetWidth(), WaylandGetHeight()))
                 break;
-        }
+
+        RenderOrthographic2D(R2MinMax(V2(-1.0f, -1.0f), V2(1.0f, 1.0f)));
+
+        RenderRect(R2MinMax(V2(-0.5f, -0.5f), V2(0.5f, 0.5f)), V4(1.0f, 0.8f, 0.5f, 1.0f));
 
         if (!VulkanRender())
             break;
