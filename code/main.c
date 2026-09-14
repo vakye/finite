@@ -24,10 +24,9 @@ int main(int ArgCount, char* Args[])
 {
     setvbuf(stdout, 0, _IONBF, 0);
 
-    wayland_state Wayland = {0};
-    if (!WaylandSetup(&Wayland))
+    if (!WaylandSetup())
     {
-        WaylandShutdown(&Wayland);
+        WaylandShutdown();
         return (1);
     }
 
@@ -70,24 +69,18 @@ int main(int ArgCount, char* Args[])
     struct timespec FrameBegin = {0};
     clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
 
-    while (!WaylandIsClosed(&Wayland))
+    while (!WaylandIsClosed())
     {
-        for (unsigned int Index = 0; Index < ARRAY_COUNT(Input->ButtonStates); Index++)
-        {
-            input_button_state* State = Input->ButtonStates + Index;
-            State->WasDown = State->IsDown;
-        }
+        WaylandPollEvents();
 
-        WaylandPollEvents(&Wayland, &Platform.Input);
-
-        if (WaylandShouldResize(&Wayland))
+        if (WaylandShouldResize())
         {
-            if (!VulkanResize(&Vulkan, WaylandGetWidth(&Wayland), WaylandGetHeight(&Wayland)))
+            if (!VulkanResize(&Vulkan, WaylandGetWidth(), WaylandGetHeight()))
                 break;
         }
 
-        Platform.WindowSizeX = WaylandGetWidth(&Wayland);
-        Platform.WindowSizeY = WaylandGetHeight(&Wayland);
+        Platform.WindowSizeX = WaylandGetWidth();
+        Platform.WindowSizeY = WaylandGetHeight();
 
         render_batch RenderBatch = {0};
 
@@ -97,7 +90,7 @@ int main(int ArgCount, char* Args[])
         if (!VulkanRender(&Vulkan, &RenderSpec, &RenderBatch))
             break;
 
-        WaylandPresent(&Wayland);
+        WaylandPresent();
 
         struct timespec Now = {0};
         clock_gettime(CLOCK_MONOTONIC, &Now);
@@ -110,7 +103,7 @@ int main(int ArgCount, char* Args[])
     }
 
     VulkanShutdown(&Vulkan);
-    WaylandShutdown(&Wayland);
+    WaylandShutdown();
 
     return (0);
 }
