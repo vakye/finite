@@ -3,8 +3,8 @@
 
 [Gameplay Loop]
 
-    [ ] - Stage generation
-    [ ] - Progress to next stage
+    [x] - Stage generation
+    [x] - Progress to next stage
     [ ] - Boss stage
     [ ] - Shop stage
     [ ] - Currency
@@ -51,9 +51,9 @@
 
 [Visual Effects]
 
-    [ ] - Bullet Smoke
-    [ ] - Bullet Impact
-    [ ] - Particle effects
+    [x] - Bullet Smoke
+    [x] - Bullet Impact
+    [x] - Particle effects
 
 [Music]
 
@@ -87,7 +87,6 @@
 
     [x] - Seperate Wayland graphical/input backend
     [x] - Seperate Vulkan renderer backend
-    [ ] - Unified platform struct
 
 [Graphics Backend]
 
