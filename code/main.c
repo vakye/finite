@@ -10,6 +10,7 @@
 #include "math.c"
 #include "input.c"
 #include "render.c"
+#include "game.c"
 
 #include <sys/mman.h>
 #include <time.h>
@@ -36,6 +37,12 @@ s32 main(s32 ArgCount, char* Args[])
         return (1);
     }
 
+    struct timespec SeedTime = {0};
+    clock_gettime(CLOCK_MONOTONIC, &SeedTime);
+    usize RandomSeed = SeedTime.tv_nsec;
+
+    GameSetup(RandomSeed);
+
     float DeltaTime = 1.0f/60.0f;
 
     struct timespec FrameBegin = {0};
@@ -52,9 +59,7 @@ s32 main(s32 ArgCount, char* Args[])
             if (!VulkanResize(WaylandGetWidth(), WaylandGetHeight()))
                 break;
 
-        RenderOrthographic2D(R2MinMax(V2(-1.0f, -1.0f), V2(1.0f, 1.0f)));
-
-        RenderRect(R2MinMax(V2(-0.5f, -0.5f), V2(0.5f, 0.5f)), V4(1.0f, 0.8f, 0.5f, 1.0f));
+        GameUpdateAndRender(DeltaTime, WaylandGetWidth(), WaylandGetHeight());
 
         if (!VulkanRender())
             break;
