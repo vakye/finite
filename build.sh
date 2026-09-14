@@ -24,7 +24,8 @@ CompileFlags=" \
     -Wall -Wextra -Wpedantic -Werror \
     -Wno-unused-parameter \
     -Wno-unused-variable \
-    -Wno-unused-function
+    -Wno-unused-function \
+    -Wno-unused-but-set-variable \
     -o $OutputFile"
 
 LinkFlags=" \

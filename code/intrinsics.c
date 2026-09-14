@@ -3,27 +3,27 @@
 
 #include <immintrin.h>
 
-static unsigned int RotateRight32(unsigned int Value, unsigned int Shift)
+static u32 RotateRight32(u32 Value, u32 Shift)
 {
-	unsigned int Result = (Value >> Shift) | (Value << (-Shift & 31));
+	u32 Result = (Value >> Shift) | (Value << (-Shift & 31));
     return (Result);
 }
 
-static float Square(float X)
+static f32 Square(f32 X)
 {
-    float Result = X*X;
+    f32 Result = X*X;
     return (Result);
 }
 
-static float SquareRoot(float X)
+static f32 SquareRoot(f32 X)
 {
-    float Result = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(X)));
+    f32 Result = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(X)));
     return (Result);
 }
 
-static float InvSquareRoot(float X)
+static f32 InvSquareRoot(f32 X)
 {
-    float Result = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(X)));
+    f32 Result = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(X)));
     return (Result);
 }
 

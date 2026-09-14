@@ -3,16 +3,14 @@
 
 // NOTE(vak): Cheatsheet
 
-typedef struct wayland_state wayland_state;
-
-static int          WaylandSetup(void);
-static void         WaylandShutdown(void);
-static int          WaylandIsClosed(void);
-static int          WaylandShouldResize(void);
-static unsigned int WaylandGetWidth(void);
-static unsigned int WaylandGetHeight(void);
-static void         WaylandPollEvents(void);
-static void         WaylandPresent(void);
+static b32  WaylandSetup        (void);
+static void WaylandShutdown     (void);
+static b32  WaylandIsClosed     (void);
+static b32  WaylandShouldResize (void);
+static u32  WaylandGetWidth     (void);
+static u32  WaylandGetHeight    (void);
+static void WaylandPollEvents   (void);
+static void WaylandPresent      (void);
 
 // NOTE(vak): Implementation
 
@@ -23,7 +21,7 @@ static void         WaylandPresent(void);
 #include "xdg-shell-client.h"
 #include "xdg-shell.c"
 
-struct wayland_state
+typedef struct
 {
     struct wl_display*      Display;
     struct wl_registry*     Registry;
@@ -41,33 +39,32 @@ struct wayland_state
     struct xkb_keymap*      XkbKeymap;
     struct xkb_state*       XkbState;
 
-    int                     IsFullscreen;
-    int                     IsClosed;
-
-    int                     IsResizing;
-    int                     ReadyToResize;
-    int                     Width, Height;
-};
+    b32                     IsFullscreen;
+    b32                     IsClosed;
+    b32                     IsResizing;
+    b32                     ReadyToResize;
+    u32                     Width, Height;
+} wayland_state;
 
 static wayland_state Wayland = {0};
 
-static int WaylandConnectDisplay    (void);
-static int WaylandGetRegistry       (void);
-static int WaylandCreateSurface     (void);
-static int WaylandGetXdgSurface     (void);
-static int WaylandGetXdgTopLevel    (void);
-static int WaylandNotifyServerDone  (void);
+static b32 WaylandConnectDisplay    (void);
+static b32 WaylandGetRegistry       (void);
+static b32 WaylandCreateSurface     (void);
+static b32 WaylandGetXdgSurface     (void);
+static b32 WaylandGetXdgTopLevel    (void);
+static b32 WaylandNotifyServerDone  (void);
 
-static int WaylandSetup(void)
+static b32 WaylandSetup(void)
 {
-    if (!WaylandConnectDisplay())       return (0);
-    if (!WaylandGetRegistry())          return (0);
-    if (!WaylandCreateSurface())        return (0);
-    if (!WaylandGetXdgSurface())        return (0);
-    if (!WaylandGetXdgTopLevel())       return (0);
-    if (!WaylandNotifyServerDone())     return (0);
+    if (!WaylandConnectDisplay())       return (false);
+    if (!WaylandGetRegistry())          return (false);
+    if (!WaylandCreateSurface())        return (false);
+    if (!WaylandGetXdgSurface())        return (false);
+    if (!WaylandGetXdgTopLevel())       return (false);
+    if (!WaylandNotifyServerDone())     return (false);
 
-    return (1);
+    return (true);
 }
 
 static void WaylandShutdown(void)
@@ -88,24 +85,24 @@ static void WaylandShutdown(void)
     if (Wayland.Display)        wl_display_disconnect(Wayland.Display);
 }
 
-static int WaylandIsClosed(void)
+static b32 WaylandIsClosed(void)
 {
     return (Wayland.IsClosed);
 }
 
-static int WaylandShouldResize(void)
+static b32 WaylandShouldResize(void)
 {
     return (Wayland.ReadyToResize);
 }
 
-static unsigned int WaylandGetWidth(void)
+static u32 WaylandGetWidth(void)
 {
-    return Maximum(0, Wayland.Width);
+    return (Wayland.Width);
 }
 
-static unsigned int WaylandGetHeight(void)
+static u32 WaylandGetHeight(void)
 {
-    return Maximum(0, Wayland.Height);
+    return (Wayland.Height);
 }
 
 static void WaylandPollEvents(void)
@@ -128,7 +125,7 @@ static void WaylandError(char* Message)
 static void WaylandPointerEnter(
     void*               Data,
     struct wl_pointer*  Pointer,
-    unsigned int        Serial,
+    u32                 Serial,
     struct wl_surface*  Surface,
     wl_fixed_t          X,
     wl_fixed_t          Y
@@ -139,7 +136,7 @@ static void WaylandPointerEnter(
 static void WaylandPointerLeave(
     void*               Data,
     struct wl_pointer*  Pointer,
-    unsigned int        Serial,
+    u32                 Serial,
     struct wl_surface*  Surface
 )
 {
@@ -148,7 +145,7 @@ static void WaylandPointerLeave(
 static void WaylandPointerMotion(
     void*               Data,
     struct wl_pointer*  Pointer,
-    unsigned int        Time,
+    u32                 Time,
     wl_fixed_t          X,
     wl_fixed_t          Y
 )
@@ -158,10 +155,10 @@ static void WaylandPointerMotion(
 static void WaylandPointerButton(
     void*               Data,
     struct wl_pointer*  Pointer,
-    unsigned int        Serial,
-    unsigned int        Time,
-    unsigned int        Button,
-    unsigned int        State
+    u32                 Serial,
+    u32                 Time,
+    u32                 Button,
+    u32                 State
 )
 {
 }
@@ -177,9 +174,9 @@ static struct wl_pointer_listener WaylandPointerListener =
 static void WaylandKeyboardKeymap(
     void*               Data,
     struct wl_keyboard* Keyboard,
-    unsigned int        Format,
-    int                 FileDescriptor,
-    unsigned int        Size
+    u32                 Format,
+    s32                 FileDescriptor,
+    u32                 Size
 )
 {
     if (Format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
@@ -195,7 +192,7 @@ static void WaylandKeyboardKeymap(
         return;
     }
 
-    int XkbOkay = true;
+    b32 XkbOkay = true;
 
     Wayland.XkbContext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (!Wayland.XkbContext)
@@ -232,7 +229,7 @@ static void WaylandKeyboardKeymap(
 static void WaylandKeyboardEnter(
     void*               Data,
     struct wl_keyboard* Keyboard,
-    unsigned int        Serial,
+    u32                 Serial,
     struct wl_surface*  Surface,
     struct wl_array*    Keys
 )
@@ -242,7 +239,7 @@ static void WaylandKeyboardEnter(
 static void WaylandKeyboardLeave(
     void*               Data,
     struct wl_keyboard* Keyboard,
-    unsigned int        Serial,
+    u32                 Serial,
     struct wl_surface*  Surface
 )
 {
@@ -251,41 +248,34 @@ static void WaylandKeyboardLeave(
 static void WaylandKeyboardKey(
     void*               Data,
     struct wl_keyboard* Keyboard,
-    unsigned int        Serial,
-    unsigned int        Time,
-    unsigned int        EvdevScancode,
-    unsigned int        State
+    u32                 Serial,
+    u32                 Time,
+    u32                 EvdevScancode,
+    u32                 State
 )
 {
-    unsigned int XkbScancode    = EvdevScancode + 8;
-    xkb_keysym_t KeySym         = xkb_state_key_get_one_sym(Wayland.XkbState, XkbScancode);
-    unsigned int IsDown         = (State == WL_KEYBOARD_KEY_STATE_PRESSED);
-
-#if 0
-    input_button Button = U32Max;
+    u32             XkbScancode    = EvdevScancode + 8;
+    xkb_keysym_t    KeySym         = xkb_state_key_get_one_sym(Wayland.XkbState, XkbScancode);
+    b32             IsDown         = (State == WL_KEYBOARD_KEY_STATE_PRESSED);
 
     switch (KeySym)
     {
-        case XKB_KEY_w: case XKB_KEY_Up:    Button = InputButton_MoveUp;        break;
-        case XKB_KEY_a: case XKB_KEY_Left:  Button = InputButton_MoveLeft;      break;
-        case XKB_KEY_s: case XKB_KEY_Down:  Button = InputButton_MoveDown;      break;
-        case XKB_KEY_d: case XKB_KEY_Right: Button = InputButton_MoveRight;     break;
-        case XKB_KEY_space:                 Button = InputButton_Shoot;         break;
+        case XKB_KEY_w: case XKB_KEY_Up:    InputReportButton(InputButton_MoveUp,       IsDown);    break;
+        case XKB_KEY_a: case XKB_KEY_Left:  InputReportButton(InputButton_MoveLeft,     IsDown);    break;
+        case XKB_KEY_s: case XKB_KEY_Down:  InputReportButton(InputButton_MoveDown,     IsDown);    break;
+        case XKB_KEY_d: case XKB_KEY_Right: InputReportButton(InputButton_MoveRight,    IsDown);    break;
+        case XKB_KEY_space:                 InputReportButton(InputButton_Shoot,        IsDown);    break;
     }
-
-    if (Button < InputButton_COUNT)
-        Input->ButtonStates[Button].IsDown = IsDown;
-#endif
 }
 
 static void WaylandKeyboardModifiers(
     void*               Data,
     struct wl_keyboard* Keyboard,
-    unsigned int        Serial,
-    unsigned int        ModifiersDepressed,
-    unsigned int        ModifiersLatched,
-    unsigned int        ModifiersLocked,
-    unsigned int        Group
+    u32                 Serial,
+    u32                 ModifiersDepressed,
+    u32                 ModifiersLatched,
+    u32                 ModifiersLocked,
+    u32                 Group
 )
 {
 }
@@ -304,7 +294,7 @@ static struct wl_keyboard_listener WaylandKeyboardListener =
 static void WaylandXdgWmBasePing(
     void*               Data,
     struct xdg_wm_base* XdgWmBase,
-    unsigned int        Serial
+    u32                 Serial
 )
 {
     xdg_wm_base_pong(XdgWmBase, Serial);
@@ -318,7 +308,7 @@ static struct xdg_wm_base_listener WaylandXdgWmBaseListener =
 static void WaylandSeatCapabilities(
     void*               Data,
     struct wl_seat*     Seat,
-    unsigned int        Capabilities
+    u32                 Capabilities
 )
 {
     if (Capabilities & WL_SEAT_CAPABILITY_POINTER)
@@ -352,9 +342,9 @@ static struct wl_seat_listener WaylandSeatListener =
 static void WaylandHandleRegistryGlobal( 
     void*                   Data, 
     struct wl_registry*     Registry, 
-    unsigned int            Name, 
+    u32                     Name, 
     const char*             Interface, 
-    unsigned int            Version 
+    u32                     Version 
 )
 {
     if (strcmp(Interface, wl_compositor_interface.name) == 0)
@@ -391,7 +381,7 @@ static struct wl_registry_listener WaylandRegistryListener =
 static void WaylandXdgSurfaceConfigure(
     void*               Data,
     struct xdg_surface* XdgSurface,
-    unsigned int        Serial
+    u32                 Serial
 )
 {
     xdg_surface_ack_configure(XdgSurface, Serial);
@@ -409,15 +399,18 @@ static struct xdg_surface_listener WaylandXdgSurfaceListener =
 static void WaylandXdgTopLevelConfigure(
     void*                   Data,
     struct xdg_toplevel*    XdgTopLevel,
-    int                     Width,
-    int                     Height,
+    s32                     Width,
+    s32                     Height,
     struct wl_array*        States
 )
 {
-    if ((Width != Wayland.Width) && (Height != Wayland.Height))
+    u32 ClampedWidth  = (u32)Maximum(0, Width);
+    u32 ClampedHeight = (u32)Maximum(0, Height);
+
+    if ((ClampedWidth != Wayland.Width) && (ClampedHeight != Wayland.Height))
     {
-        Wayland.Width      = Width;
-        Wayland.Height     = Height;
+        Wayland.Width      = ClampedWidth;
+        Wayland.Height     = ClampedHeight;
         Wayland.IsResizing = true;
     }
 }
@@ -438,31 +431,31 @@ static struct xdg_toplevel_listener WaylandXdgTopLevelListener =
 
 // NOTE(vak): Main code
 
-static int WaylandConnectDisplay(void)
+static b32 WaylandConnectDisplay(void)
 {
     Wayland.Display = wl_display_connect(0);
     if (!Wayland.Display)
     {
         WaylandError("failed to connect to display");
-        return (0);
+        return (false);
     }
 
-    return (1);
+    return (true);
 }
 
-static int WaylandGetRegistry(void)
+static b32 WaylandGetRegistry(void)
 {
     Wayland.Registry = wl_display_get_registry(Wayland.Display);
     if (!Wayland.Registry)
     {
         WaylandError("failed to get wl_registry");
-        return (0);
+        return (false);
     }
 
     wl_registry_add_listener(Wayland.Registry, &WaylandRegistryListener, 0);
     wl_display_roundtrip(Wayland.Display);
 
-    int NotOkay =
+    b32 NotOkay =
         (Wayland.Compositor    == 0) ||
         (Wayland.XdgWmBase     == 0) ||
         (Wayland.Seat          == 0) ||
@@ -473,59 +466,59 @@ static int WaylandGetRegistry(void)
     if (!Wayland.Seat)         WaylandError("failed to register wl_seat");
     if (!Wayland.Output)       WaylandError("failed to register wl_output");
 
-    int Okay = !NotOkay;
+    b32 Okay = !NotOkay;
 
     return (Okay);
 }
 
-static int WaylandCreateSurface(void)
+static b32 WaylandCreateSurface(void)
 {
     Wayland.Surface = wl_compositor_create_surface(Wayland.Compositor);
     if (!Wayland.Surface)
     {
         WaylandError("failed to create wl_surface");
-        return (0);
+        return (false);
     }
 
-    return (1);
+    return (true);
 }
 
-static int WaylandGetXdgSurface(void)
+static b32 WaylandGetXdgSurface(void)
 {
     Wayland.XdgSurface = xdg_wm_base_get_xdg_surface(Wayland.XdgWmBase, Wayland.Surface);
     if (!Wayland.XdgSurface)
     {
         WaylandError("failed to get xdg_surface from xdg_wm_base");
-        return (0);
+        return (false);
     }
 
     xdg_surface_add_listener(Wayland.XdgSurface, &WaylandXdgSurfaceListener, 0);
 
-    return (1);
+    return (true);
 }
 
-static int WaylandGetXdgTopLevel(void)
+static b32 WaylandGetXdgTopLevel(void)
 {
     Wayland.XdgTopLevel = xdg_surface_get_toplevel(Wayland.XdgSurface);
     if (!Wayland.XdgTopLevel)
     {
         WaylandError("failed to get xdg_toplevel from xdg_surface");
-        return (0);
+        return (false);
     }
 
     xdg_toplevel_add_listener(Wayland.XdgTopLevel, &WaylandXdgTopLevelListener, 0);
     xdg_toplevel_set_title(Wayland.XdgTopLevel, "finite");
     xdg_toplevel_set_app_id(Wayland.XdgTopLevel, "finite");
 
-    return (1);
+    return (true);
 }
 
-static int WaylandNotifyServerDone(void)
+static b32 WaylandNotifyServerDone(void)
 {
     wl_surface_commit(Wayland.Surface);
     wl_display_roundtrip(Wayland.Display);
     wl_surface_commit(Wayland.Surface);
 
-    return (1);
+    return (true);
 }
 
