@@ -43,7 +43,8 @@ s32 main(s32 ArgCount, char* Args[])
 
     GameSetup(RandomSeed);
 
-    float DeltaTime = 1.0f/60.0f;
+    float TargetDeltaTime = 1.0f/165.0f;
+    float DeltaTime = TargetDeltaTime;
 
     struct timespec FrameBegin = {0};
     clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
@@ -67,6 +68,28 @@ s32 main(s32 ArgCount, char* Args[])
         WaylandPresent();
 
         struct timespec Now = {0};
+        clock_gettime(CLOCK_MONOTONIC, &Now);
+
+        DeltaTime =
+            (f64)(Now.tv_sec - FrameBegin.tv_sec) +
+            (f64)(Now.tv_nsec - FrameBegin.tv_nsec) * 1e-9;
+
+        if (DeltaTime < TargetDeltaTime)
+        {
+            struct timespec Duration = (struct timespec)
+            {
+                .tv_nsec = (usize)((TargetDeltaTime - DeltaTime) * 1e9),
+            };
+
+            struct timespec Remaining = {0};
+
+            do
+            {
+                nanosleep(&Duration, &Remaining);
+                Duration = Remaining;
+            } while (Remaining.tv_nsec);
+        }
+
         clock_gettime(CLOCK_MONOTONIC, &Now);
 
         DeltaTime =
