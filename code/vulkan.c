@@ -6,21 +6,10 @@
 
 // NOTE(vak): Cheatsheet
 
-typedef struct vulkan_state vulkan_state;
-
-typedef struct
-{
-    #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-        wayland_state* Wayland;
-    #else
-        #error Missing Vulkan setup info for platform
-    #endif
-} vulkan_setup_info;
-
-static int VulkanSetup(vulkan_state* Vulkan, vulkan_setup_info* Info);
-static void VulkanShutdown(vulkan_state* Vulkan);
-static int VulkanResize(vulkan_state* Vulkan, unsigned int Width, unsigned int Height);
-static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* Batch);
+static int VulkanSetup(void);
+static void VulkanShutdown(void);
+static int VulkanResize(unsigned int Width, unsigned int Height);
+static int VulkanRender(render_spec* Spec, render_batch* Batch);
 
 // NOTE(vak): Implementation
 
@@ -38,7 +27,7 @@ typedef struct
     void*           Mapping;
 } vulkan_buffer;
 
-struct vulkan_state
+typedef struct
 {
     unsigned int                VersionOfAPI;
     VkInstance                  Instance;
@@ -66,7 +55,7 @@ struct vulkan_state
     unsigned int                SwapchainImageCount;
     VkImage                     SwapchainImages[16];
     VkImageView                 SwapchainImageViews[16];
-};
+} vulkan_state;
 
 typedef struct
 {
@@ -80,25 +69,26 @@ typedef struct
     m4x4 Projection;
 } vulkan_push_constants;
 
+static vulkan_state Vulkan = {0};
+
 static void VulkanError(char* Message);
 
-static int VulkanCreateInstance         (vulkan_state* Vulkan);
-static int VulkanCreateSurface          (vulkan_state* Vulkan, vulkan_setup_info* Info);
-static int VulkanPickPhysicalDevice     (vulkan_state* Vulkan);
-static int VulkanSelectQueueFamily      (vulkan_state* Vulkan);
-static int VulkanCreateDevice           (vulkan_state* Vulkan);
-static int VulkanGetQueue               (vulkan_state* Vulkan);
-static int VulkanCreateCommandPool      (vulkan_state* Vulkan);
-static int VulkanAllocateCommandBuffer  (vulkan_state* Vulkan);
-static int VulkanCreateSemaphores       (vulkan_state* Vulkan);
-static int VulkanPickSwapchainFormat    (vulkan_state* Vulkan);
-static int VulkanPickPresentMode        (vulkan_state* Vulkan);
-static int VulkanCreateSetLayout        (vulkan_state* Vulkan);
-static int VulkanCreatePipelineLayout   (vulkan_state* Vulkan);
-static int VulkanCreatePipeline         (vulkan_state* Vulkan);
+static int VulkanCreateInstance         (void);
+static int VulkanCreateSurface          (void);
+static int VulkanPickPhysicalDevice     (void);
+static int VulkanSelectQueueFamily      (void);
+static int VulkanCreateDevice           (void);
+static int VulkanGetQueue               (void);
+static int VulkanCreateCommandPool      (void);
+static int VulkanAllocateCommandBuffer  (void);
+static int VulkanCreateSemaphores       (void);
+static int VulkanPickSwapchainFormat    (void);
+static int VulkanPickPresentMode        (void);
+static int VulkanCreateSetLayout        (void);
+static int VulkanCreatePipelineLayout   (void);
+static int VulkanCreatePipeline         (void);
 
 static int VulkanCreateBuffer(
-    vulkan_state*           Vulkan,
     vulkan_buffer*          Buffer,
     size_t                  Size,
     VkBufferUsageFlags      UsageFlags,
@@ -106,30 +96,27 @@ static int VulkanCreateBuffer(
     int                     Mapped
 );
 
-static void VulkanDestroyBuffer(vulkan_state* Vulkan, vulkan_buffer* Buffer);
+static void VulkanDestroyBuffer(vulkan_buffer* Buffer);
 
-static int VulkanSetup(vulkan_state* Vulkan, vulkan_setup_info* Info)
+static int VulkanSetup(void)
 {
-    memset(Vulkan, 0, sizeof(vulkan_state));
-
-    if (!VulkanCreateInstance(Vulkan))              return (0);
-    if (!VulkanCreateSurface(Vulkan, Info))         return (0);
-    if (!VulkanPickPhysicalDevice(Vulkan))          return (0);
-    if (!VulkanSelectQueueFamily(Vulkan))           return (0);
-    if (!VulkanCreateDevice(Vulkan))                return (0);
-    if (!VulkanGetQueue(Vulkan))                    return (0);
-    if (!VulkanCreateCommandPool(Vulkan))           return (0);
-    if (!VulkanAllocateCommandBuffer(Vulkan))       return (0);
-    if (!VulkanCreateSemaphores(Vulkan))            return (0);
-    if (!VulkanPickSwapchainFormat(Vulkan))         return (0);
-    if (!VulkanPickPresentMode(Vulkan))             return (0);
-    if (!VulkanCreateSetLayout(Vulkan))             return (0);
-    if (!VulkanCreatePipelineLayout(Vulkan))        return (0);
-    if (!VulkanCreatePipeline(Vulkan))              return (0);
+    if (!VulkanCreateInstance())            return (0);
+    if (!VulkanCreateSurface())             return (0);
+    if (!VulkanPickPhysicalDevice())        return (0);
+    if (!VulkanSelectQueueFamily())         return (0);
+    if (!VulkanCreateDevice())              return (0);
+    if (!VulkanGetQueue())                  return (0);
+    if (!VulkanCreateCommandPool())         return (0);
+    if (!VulkanAllocateCommandBuffer())     return (0);
+    if (!VulkanCreateSemaphores())          return (0);
+    if (!VulkanPickSwapchainFormat())       return (0);
+    if (!VulkanPickPresentMode())           return (0);
+    if (!VulkanCreateSetLayout())           return (0);
+    if (!VulkanCreatePipelineLayout())      return (0);
+    if (!VulkanCreatePipeline())            return (0);
 
     if (!VulkanCreateBuffer(
-        Vulkan,
-        &Vulkan->VertexBuffer,
+        &Vulkan.VertexBuffer,
         2 * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|
@@ -146,62 +133,60 @@ static int VulkanSetup(vulkan_state* Vulkan, vulkan_setup_info* Info)
     return (1);
 }
 
-static void VulkanShutdown(vulkan_state* Vulkan)
+static void VulkanShutdown(void)
 {
-    if (Vulkan->Swapchain)
+    if (Vulkan.Swapchain)
     {
-        for (unsigned int Index = 0; Index < Vulkan->SwapchainImageCount; Index++)
-            vkDestroyImageView(Vulkan->Device, Vulkan->SwapchainImageViews[Index], 0);
+        for (unsigned int Index = 0; Index < Vulkan.SwapchainImageCount; Index++)
+            vkDestroyImageView(Vulkan.Device, Vulkan.SwapchainImageViews[Index], 0);
 
-        vkDestroySwapchainKHR(Vulkan->Device, Vulkan->Swapchain, 0);
+        vkDestroySwapchainKHR(Vulkan.Device, Vulkan.Swapchain, 0);
     }
 
-    VulkanDestroyBuffer(Vulkan, &Vulkan->VertexBuffer);
+    VulkanDestroyBuffer(&Vulkan.VertexBuffer);
 
-    if (Vulkan->Pipeline)               vkDestroyPipeline(Vulkan->Device, Vulkan->Pipeline, 0);
-    if (Vulkan->PipelineLayout)         vkDestroyPipelineLayout(Vulkan->Device, Vulkan->PipelineLayout, 0);
-    if (Vulkan->SetLayout)              vkDestroyDescriptorSetLayout(Vulkan->Device, Vulkan->SetLayout, 0);
+    if (Vulkan.Pipeline)               vkDestroyPipeline(Vulkan.Device, Vulkan.Pipeline, 0);
+    if (Vulkan.PipelineLayout)         vkDestroyPipelineLayout(Vulkan.Device, Vulkan.PipelineLayout, 0);
+    if (Vulkan.SetLayout)              vkDestroyDescriptorSetLayout(Vulkan.Device, Vulkan.SetLayout, 0);
 
-    if (Vulkan->SubmitSemaphore)        vkDestroySemaphore(Vulkan->Device, Vulkan->SubmitSemaphore, 0);
-    if (Vulkan->AcquireSemaphore)       vkDestroySemaphore(Vulkan->Device, Vulkan->AcquireSemaphore, 0);
+    if (Vulkan.SubmitSemaphore)        vkDestroySemaphore(Vulkan.Device, Vulkan.SubmitSemaphore, 0);
+    if (Vulkan.AcquireSemaphore)       vkDestroySemaphore(Vulkan.Device, Vulkan.AcquireSemaphore, 0);
 
-    if (Vulkan->CommandBuffer)          vkFreeCommandBuffers(Vulkan->Device, Vulkan->CommandPool, 1, &Vulkan->CommandBuffer);
-    if (Vulkan->CommandPool)            vkDestroyCommandPool(Vulkan->Device, Vulkan->CommandPool, 0);
+    if (Vulkan.CommandBuffer)          vkFreeCommandBuffers(Vulkan.Device, Vulkan.CommandPool, 1, &Vulkan.CommandBuffer);
+    if (Vulkan.CommandPool)            vkDestroyCommandPool(Vulkan.Device, Vulkan.CommandPool, 0);
 
-    if (Vulkan->Device)                 vkDestroyDevice(Vulkan->Device, 0);
-    if (Vulkan->Surface)                vkDestroySurfaceKHR(Vulkan->Instance, Vulkan->Surface, 0);
-    if (Vulkan->Instance)               vkDestroyInstance(Vulkan->Instance, 0);
-
-    memset(Vulkan, 0, sizeof(vulkan_state));
+    if (Vulkan.Device)                 vkDestroyDevice(Vulkan.Device, 0);
+    if (Vulkan.Surface)                vkDestroySurfaceKHR(Vulkan.Instance, Vulkan.Surface, 0);
+    if (Vulkan.Instance)               vkDestroyInstance(Vulkan.Instance, 0);
 }
 
-static int VulkanResize(vulkan_state* Vulkan, unsigned int Width, unsigned int Height)
+static int VulkanResize(unsigned int Width, unsigned int Height)
 {
-    if ((Vulkan->SwapchainExtent.width == Width) &&
-        (Vulkan->SwapchainExtent.height == Height))
+    if ((Vulkan.SwapchainExtent.width == Width) &&
+        (Vulkan.SwapchainExtent.height == Height))
     {
         return (1);
     }
 
-    if (vkDeviceWaitIdle(Vulkan->Device))
+    if (vkDeviceWaitIdle(Vulkan.Device))
     {
         VulkanError("failed to wait until device idle before swapchain resize");
         return (0);
     }
 
-    if (Vulkan->Swapchain)
+    if (Vulkan.Swapchain)
     {
-        for (unsigned int Index = 0; Index < Vulkan->SwapchainImageCount; Index++)
-            vkDestroyImageView(Vulkan->Device, Vulkan->SwapchainImageViews[Index], 0);
+        for (unsigned int Index = 0; Index < Vulkan.SwapchainImageCount; Index++)
+            vkDestroyImageView(Vulkan.Device, Vulkan.SwapchainImageViews[Index], 0);
 
-        vkDestroySwapchainKHR(Vulkan->Device, Vulkan->Swapchain, 0);
+        vkDestroySwapchainKHR(Vulkan.Device, Vulkan.Swapchain, 0);
     }
 
     VkSurfaceCapabilitiesKHR SurfaceCaps = {0};
 
     if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-        Vulkan->PhysicalDevice,
-        Vulkan->Surface,
+        Vulkan.PhysicalDevice,
+        Vulkan.Surface,
         &SurfaceCaps
     ))
     {
@@ -211,47 +196,47 @@ static int VulkanResize(vulkan_state* Vulkan, unsigned int Width, unsigned int H
 
     int DesiredImageCount = (SurfaceCaps.minImageCount <= 3) ? (3) : (SurfaceCaps.minImageCount);
 
-    Vulkan->SwapchainExtent = (VkExtent2D){.width = Width, .height = Height};
+    Vulkan.SwapchainExtent = (VkExtent2D){.width = Width, .height = Height};
 
     VkSwapchainCreateInfoKHR SwapchainInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = Vulkan->Surface,
+        .surface = Vulkan.Surface,
         .minImageCount = DesiredImageCount,
-        .imageFormat = Vulkan->SwapchainFormat.format,
-        .imageColorSpace = Vulkan->SwapchainFormat.colorSpace,
-        .imageExtent = Vulkan->SwapchainExtent,
+        .imageFormat = Vulkan.SwapchainFormat.format,
+        .imageColorSpace = Vulkan.SwapchainFormat.colorSpace,
+        .imageExtent = Vulkan.SwapchainExtent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = SurfaceCaps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = Vulkan->PresentMode,
+        .presentMode = Vulkan.PresentMode,
         .clipped = 1,
     };
 
-    if (vkCreateSwapchainKHR(Vulkan->Device, &SwapchainInfo, 0, &Vulkan->Swapchain))
+    if (vkCreateSwapchainKHR(Vulkan.Device, &SwapchainInfo, 0, &Vulkan.Swapchain))
     {
         VulkanError("failed to create swapchain");
         return (0);
     }
 
-    Vulkan->SwapchainImageCount = ARRAY_COUNT(Vulkan->SwapchainImages);
+    Vulkan.SwapchainImageCount = ARRAY_COUNT(Vulkan.SwapchainImages);
 
-    if (vkGetSwapchainImagesKHR(Vulkan->Device, Vulkan->Swapchain, &Vulkan->SwapchainImageCount, Vulkan->SwapchainImages))
+    if (vkGetSwapchainImagesKHR(Vulkan.Device, Vulkan.Swapchain, &Vulkan.SwapchainImageCount, Vulkan.SwapchainImages))
     {
         VulkanError("failed to get swapchain images");
         return (0);
     }
 
-    for (unsigned int Index = 0; Index < Vulkan->SwapchainImageCount; Index++)
+    for (unsigned int Index = 0; Index < Vulkan.SwapchainImageCount; Index++)
     {
         VkImageViewCreateInfo ImageViewInfo =
         {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = Vulkan->SwapchainImages[Index],
+            .image = Vulkan.SwapchainImages[Index],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = Vulkan->SwapchainFormat.format,
+            .format = Vulkan.SwapchainFormat.format,
             .components =
             {
                 .r = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -267,14 +252,14 @@ static int VulkanResize(vulkan_state* Vulkan, unsigned int Width, unsigned int H
             },
         };
 
-        if (vkCreateImageView(Vulkan->Device, &ImageViewInfo, 0, &Vulkan->SwapchainImageViews[Index]))
+        if (vkCreateImageView(Vulkan.Device, &ImageViewInfo, 0, &Vulkan.SwapchainImageViews[Index]))
         {
             VulkanError("failed to create swapchain image view");
             return (0);
         }
     }
 
-    if (vkDeviceWaitIdle(Vulkan->Device))
+    if (vkDeviceWaitIdle(Vulkan.Device))
     {
         VulkanError("failed to wait until device idle after swapchain resize");
         return (0);
@@ -283,9 +268,9 @@ static int VulkanResize(vulkan_state* Vulkan, unsigned int Width, unsigned int H
     return (1);
 }
 
-static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* Batch)
+static int VulkanRender(render_spec* Spec, render_batch* Batch)
 {
-    unsigned int MaxVertexCount = Vulkan->VertexBuffer.Size / sizeof(vulkan_vertex);
+    unsigned int MaxVertexCount = Vulkan.VertexBuffer.Size / sizeof(vulkan_vertex);
     unsigned int VerticesNeeded = Batch->RectCount * 6;
 
     if (MaxVertexCount < VerticesNeeded)
@@ -303,7 +288,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         v2 Min = RenderRect->Rect.Min;
         v2 Max = RenderRect->Rect.Max;
 
-        vulkan_vertex* V = (vulkan_vertex*)Vulkan->VertexBuffer.Mapping + VertexCount;
+        vulkan_vertex* V = (vulkan_vertex*)Vulkan.VertexBuffer.Mapping + VertexCount;
 
         V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
         V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(1.0f, 0.0f), RenderRect->Color};
@@ -324,10 +309,10 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
     unsigned int ImageIndex = 0;
 
     if (vkAcquireNextImageKHR(
-        Vulkan->Device,
-        Vulkan->Swapchain,
+        Vulkan.Device,
+        Vulkan.Swapchain,
         ~0ull,
-        Vulkan->AcquireSemaphore,
+        Vulkan.AcquireSemaphore,
         0,
         &ImageIndex
     ))
@@ -336,9 +321,9 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         return (0);
     }
 
-    VkCommandBuffer CommandBuffer       = Vulkan->CommandBuffer;
-    VkSemaphore     AcquireSemaphore    = Vulkan->AcquireSemaphore;
-    VkSemaphore     SubmitSemaphore     = Vulkan->SubmitSemaphore;
+    VkCommandBuffer CommandBuffer       = Vulkan.CommandBuffer;
+    VkSemaphore     AcquireSemaphore    = Vulkan.AcquireSemaphore;
+    VkSemaphore     SubmitSemaphore     = Vulkan.SubmitSemaphore;
 
     VkCommandBufferBeginInfo BeginInfo =
     {
@@ -367,7 +352,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = Vulkan->SwapchainImages[ImageIndex],
+        .image = Vulkan.SwapchainImages[ImageIndex],
         .subresourceRange =
         {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -388,13 +373,13 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
     VkRenderingInfo RenderingInfo =
     {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = {.offset = {0, 0}, .extent = Vulkan->SwapchainExtent},
+        .renderArea = {.offset = {0, 0}, .extent = Vulkan.SwapchainExtent},
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &(VkRenderingAttachmentInfo)
         {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = Vulkan->SwapchainImageViews[ImageIndex],
+            .imageView = Vulkan.SwapchainImageViews[ImageIndex],
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -407,9 +392,9 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
     VkViewport Viewport =
     {
         .x = 0.0f,
-        .y = (float)Vulkan->SwapchainExtent.height,
-        .width = (float)Vulkan->SwapchainExtent.width,
-        .height = -(float)Vulkan->SwapchainExtent.height,
+        .y = (float)Vulkan.SwapchainExtent.height,
+        .width = (float)Vulkan.SwapchainExtent.width,
+        .height = -(float)Vulkan.SwapchainExtent.height,
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
@@ -419,7 +404,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
     vkCmdSetViewport(CommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(CommandBuffer, 0, 1, &Scissor);
 
-    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vulkan->Pipeline);
+    vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vulkan.Pipeline);
 
     VkWriteDescriptorSet DescriptorWrites[] =
     {
@@ -432,9 +417,9 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &(VkDescriptorBufferInfo)
             {
-                .buffer = Vulkan->VertexBuffer.Buffer,
+                .buffer = Vulkan.VertexBuffer.Buffer,
                 .offset = 0,
-                .range = Vulkan->VertexBuffer.Size,
+                .range = Vulkan.VertexBuffer.Size,
             },
         },
     };
@@ -442,7 +427,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
     vkCmdPushDescriptorSet(
         CommandBuffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        Vulkan->PipelineLayout,
+        Vulkan.PipelineLayout,
         0,
         ARRAY_COUNT(DescriptorWrites),
         DescriptorWrites
@@ -450,7 +435,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
 
     vkCmdPushConstants(
         CommandBuffer,
-        Vulkan->PipelineLayout,
+        Vulkan.PipelineLayout,
         VK_SHADER_STAGE_VERTEX_BIT,
         0,
         sizeof(PushConstants),
@@ -470,7 +455,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = Vulkan->SwapchainImages[ImageIndex],
+        .image = Vulkan.SwapchainImages[ImageIndex],
         .subresourceRange =
         {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -508,7 +493,7 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         .pSignalSemaphores = &SubmitSemaphore,
     };
 
-    if (vkQueueSubmit(Vulkan->Queue, 1, &SubmitInfo, 0))
+    if (vkQueueSubmit(Vulkan.Queue, 1, &SubmitInfo, 0))
     {
         VulkanError("failed to submit");
         return (0);
@@ -520,17 +505,17 @@ static int VulkanRender(vulkan_state* Vulkan, render_spec* Spec, render_batch* B
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &SubmitSemaphore,
         .swapchainCount = 1,
-        .pSwapchains = &Vulkan->Swapchain,
+        .pSwapchains = &Vulkan.Swapchain,
         .pImageIndices = &ImageIndex,
     };
 
-    if (vkQueuePresentKHR(Vulkan->Queue, &PresentInfo))
+    if (vkQueuePresentKHR(Vulkan.Queue, &PresentInfo))
     {
         VulkanError("failed to present");
         return (0);
     }
 
-    if (vkDeviceWaitIdle(Vulkan->Device))
+    if (vkDeviceWaitIdle(Vulkan.Device))
     {
         VulkanError("failed to wait until device idle after render");
         return (0);
@@ -544,7 +529,7 @@ static void VulkanError(char* Message)
     fprintf(stderr, "[vulkan]: %s\n", Message);
 }
 
-static int VulkanCreateInstance(vulkan_state* Vulkan)
+static int VulkanCreateInstance(void)
 {
     if (volkInitialize())
     {
@@ -552,9 +537,9 @@ static int VulkanCreateInstance(vulkan_state* Vulkan)
         return (0);
     }
 
-    Vulkan->VersionOfAPI = VK_API_VERSION_1_4;
+    Vulkan.VersionOfAPI = VK_API_VERSION_1_4;
 
-    if (volkGetInstanceVersion() < Vulkan->VersionOfAPI)
+    if (volkGetInstanceVersion() < Vulkan.VersionOfAPI)
     {
         VulkanError("vulkan 1.4 or higher is required");
         return (0);
@@ -586,7 +571,7 @@ static int VulkanCreateInstance(vulkan_state* Vulkan)
             .applicationVersion = VK_MAKE_VERSION(0, 0, 1),
             .pEngineName = "Finite",
             .engineVersion = VK_MAKE_VERSION(0, 0, 1),
-            .apiVersion = Vulkan->VersionOfAPI,
+            .apiVersion = Vulkan.VersionOfAPI,
         },
         .ppEnabledExtensionNames = Extensions,
         .enabledExtensionCount = ARRAY_COUNT(Extensions),
@@ -594,34 +579,28 @@ static int VulkanCreateInstance(vulkan_state* Vulkan)
         .enabledLayerCount = ARRAY_COUNT(Layers),
     };
 
-    if (vkCreateInstance(&InstanceInfo, 0, &Vulkan->Instance))
+    if (vkCreateInstance(&InstanceInfo, 0, &Vulkan.Instance))
     {
         VulkanError("failed to create instance");
         return (0);
     }
 
-    volkLoadInstance(Vulkan->Instance);
+    volkLoadInstance(Vulkan.Instance);
 
     return (1);
 }
 
-static int VulkanCreateSurface(vulkan_state* Vulkan, vulkan_setup_info* Info)
+static int VulkanCreateSurface(void)
 {
     #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-        if (!Info->Wayland)
-        {
-            VulkanError("missing Info->Wayland in vulkan_setup_info");
-            return (0);
-        }
-
         VkWaylandSurfaceCreateInfoKHR WaylandSurfaceInfo =
         {
             .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
-            .display = Info->Wayland->Display,
-            .surface = Info->Wayland->Surface,
+            .display = Wayland.Display,
+            .surface = Wayland.Surface,
         };
 
-        if (vkCreateWaylandSurfaceKHR(Vulkan->Instance, &WaylandSurfaceInfo, 0, &Vulkan->Surface))
+        if (vkCreateWaylandSurfaceKHR(Vulkan.Instance, &WaylandSurfaceInfo, 0, &Vulkan.Surface))
         {
             VulkanError("failed to create wayland surface");
             return (0);
@@ -633,13 +612,13 @@ static int VulkanCreateSurface(vulkan_state* Vulkan, vulkan_setup_info* Info)
     return (1);
 }
 
-static int VulkanPickPhysicalDevice(vulkan_state* Vulkan)
+static int VulkanPickPhysicalDevice(void)
 {
     // TODO(vak): Suballocate this from arena allocator
     VkPhysicalDevice PhysicalDevices[64] = {0};
     unsigned int PhysicalDeviceCount = ARRAY_COUNT(PhysicalDevices);
 
-    if (vkEnumeratePhysicalDevices(Vulkan->Instance, &PhysicalDeviceCount, PhysicalDevices))
+    if (vkEnumeratePhysicalDevices(Vulkan.Instance, &PhysicalDeviceCount, PhysicalDevices))
     {
         VulkanError("failed to enumerate physical devices");
         return (0);
@@ -659,7 +638,7 @@ static int VulkanPickPhysicalDevice(vulkan_state* Vulkan)
         VkPhysicalDeviceProperties Properties = {0};
         vkGetPhysicalDeviceProperties(PhysicalDevices[Index], &Properties);
 
-        if (Properties.apiVersion < Vulkan->VersionOfAPI)
+        if (Properties.apiVersion < Vulkan.VersionOfAPI)
             continue;
 
         if (Properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
@@ -672,9 +651,9 @@ static int VulkanPickPhysicalDevice(vulkan_state* Vulkan)
         }
     }
 
-    Vulkan->PhysicalDevice = (Preferred) ? (Preferred) : (Fallback);
+    Vulkan.PhysicalDevice = (Preferred) ? (Preferred) : (Fallback);
 
-    if (!Vulkan->PhysicalDevice)
+    if (!Vulkan.PhysicalDevice)
     {
         VulkanError("no suitable GPU were found");
         return (0);
@@ -683,14 +662,14 @@ static int VulkanPickPhysicalDevice(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanSelectQueueFamily(vulkan_state* Vulkan)
+static int VulkanSelectQueueFamily(void)
 {
     // TODO(vak): Suballocate this from arena allocator
     VkQueueFamilyProperties QueueFamilies[64] = {0};
     unsigned int QueueFamilyCount = ARRAY_COUNT(QueueFamilies);
 
     vkGetPhysicalDeviceQueueFamilyProperties(
-        Vulkan->PhysicalDevice,
+        Vulkan.PhysicalDevice,
         &QueueFamilyCount,
         QueueFamilies
     );
@@ -701,7 +680,7 @@ static int VulkanSelectQueueFamily(vulkan_state* Vulkan)
         return (0);
     }
 
-    Vulkan->QueueFamilyIndex = ~0u;
+    Vulkan.QueueFamilyIndex = ~0u;
 
     for (unsigned int Index = 0; Index < QueueFamilyCount; Index++)
     {
@@ -714,12 +693,12 @@ static int VulkanSelectQueueFamily(vulkan_state* Vulkan)
 
         if ((Properties->queueFlags & RequiredFlags) == RequiredFlags)
         {
-            Vulkan->QueueFamilyIndex = Index;
+            Vulkan.QueueFamilyIndex = Index;
             break;
         }
     }
 
-    if (Vulkan->QueueFamilyIndex == ~0u)
+    if (Vulkan.QueueFamilyIndex == ~0u)
     {
         VulkanError("unable to find a suitable queue family");
         return (0);
@@ -728,7 +707,7 @@ static int VulkanSelectQueueFamily(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanCreateDevice(vulkan_state* Vulkan)
+static int VulkanCreateDevice(void)
 {
     const char* Extensions[] =
     {
@@ -756,7 +735,7 @@ static int VulkanCreateDevice(vulkan_state* Vulkan)
         .pQueueCreateInfos = &(VkDeviceQueueCreateInfo)
         {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = Vulkan->QueueFamilyIndex,
+            .queueFamilyIndex = Vulkan.QueueFamilyIndex,
             .queueCount = 1,
             .pQueuePriorities = (float[]){1.0f},
         },
@@ -764,7 +743,7 @@ static int VulkanCreateDevice(vulkan_state* Vulkan)
         .enabledExtensionCount = ARRAY_COUNT(Extensions),
     };
 
-    if (vkCreateDevice(Vulkan->PhysicalDevice, &DeviceInfo, 0, &Vulkan->Device))
+    if (vkCreateDevice(Vulkan.PhysicalDevice, &DeviceInfo, 0, &Vulkan.Device))
     {
         VulkanError("failed to create device");
         return (0);
@@ -773,22 +752,22 @@ static int VulkanCreateDevice(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanGetQueue(vulkan_state* Vulkan)
+static int VulkanGetQueue(void)
 {
-    vkGetDeviceQueue(Vulkan->Device, Vulkan->QueueFamilyIndex, 0, &Vulkan->Queue);
+    vkGetDeviceQueue(Vulkan.Device, Vulkan.QueueFamilyIndex, 0, &Vulkan.Queue);
     return (1);
 }
 
-static int VulkanCreateCommandPool(vulkan_state* Vulkan)
+static int VulkanCreateCommandPool(void)
 {
     VkCommandPoolCreateInfo CommandPoolInfo =
     {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = Vulkan->QueueFamilyIndex,
+        .queueFamilyIndex = Vulkan.QueueFamilyIndex,
     };
 
-    if (vkCreateCommandPool(Vulkan->Device, &CommandPoolInfo, 0, &Vulkan->CommandPool))
+    if (vkCreateCommandPool(Vulkan.Device, &CommandPoolInfo, 0, &Vulkan.CommandPool))
     {
         VulkanError("failed to create command pool");
         return (0);
@@ -797,17 +776,17 @@ static int VulkanCreateCommandPool(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanAllocateCommandBuffer(vulkan_state* Vulkan)
+static int VulkanAllocateCommandBuffer(void)
 {
     VkCommandBufferAllocateInfo CommandBufferInfo =
     {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = Vulkan->CommandPool,
+        .commandPool = Vulkan.CommandPool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
 
-    if (vkAllocateCommandBuffers(Vulkan->Device, &CommandBufferInfo, &Vulkan->CommandBuffer))
+    if (vkAllocateCommandBuffers(Vulkan.Device, &CommandBufferInfo, &Vulkan.CommandBuffer))
     {
         VulkanError("failed to allocate command buffer");
         return (0);
@@ -816,20 +795,20 @@ static int VulkanAllocateCommandBuffer(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanCreateSemaphores(vulkan_state* Vulkan)
+static int VulkanCreateSemaphores(void)
 {
     VkSemaphoreCreateInfo SemaphoreInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
 
-    if (vkCreateSemaphore(Vulkan->Device, &SemaphoreInfo, 0, &Vulkan->AcquireSemaphore))
+    if (vkCreateSemaphore(Vulkan.Device, &SemaphoreInfo, 0, &Vulkan.AcquireSemaphore))
     {
         VulkanError("failed to create acquire semaphore");
         return (0);
     }
 
-    if (vkCreateSemaphore(Vulkan->Device, &SemaphoreInfo, 0, &Vulkan->SubmitSemaphore))
+    if (vkCreateSemaphore(Vulkan.Device, &SemaphoreInfo, 0, &Vulkan.SubmitSemaphore))
     {
         VulkanError("failed to create submit semaphore");
         return (0);
@@ -838,7 +817,7 @@ static int VulkanCreateSemaphores(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanCreateSetLayout(vulkan_state* Vulkan)
+static int VulkanCreateSetLayout(void)
 {
     VkDescriptorSetLayoutBinding SetBindings[] =
     {
@@ -858,7 +837,7 @@ static int VulkanCreateSetLayout(vulkan_state* Vulkan)
         .pBindings = SetBindings,
     };
 
-    if (vkCreateDescriptorSetLayout(Vulkan->Device, &SetLayoutInfo, 0, &Vulkan->SetLayout))
+    if (vkCreateDescriptorSetLayout(Vulkan.Device, &SetLayoutInfo, 0, &Vulkan.SetLayout))
     {
         VulkanError("failed to create descriptor set layout");
         return (0);
@@ -867,13 +846,13 @@ static int VulkanCreateSetLayout(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanCreatePipelineLayout(vulkan_state* Vulkan)
+static int VulkanCreatePipelineLayout(void)
 {
     VkPipelineLayoutCreateInfo PipelineLayoutInfo =
     {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
-        .pSetLayouts = &Vulkan->SetLayout,
+        .pSetLayouts = &Vulkan.SetLayout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &(VkPushConstantRange)
         {
@@ -883,7 +862,7 @@ static int VulkanCreatePipelineLayout(vulkan_state* Vulkan)
         },
     };
 
-    if (vkCreatePipelineLayout(Vulkan->Device, &PipelineLayoutInfo, 0, &Vulkan->PipelineLayout))
+    if (vkCreatePipelineLayout(Vulkan.Device, &PipelineLayoutInfo, 0, &Vulkan.PipelineLayout))
     {
         VulkanError("failed to create pipeline layout");
         return (0);
@@ -892,7 +871,7 @@ static int VulkanCreatePipelineLayout(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanCreatePipeline(vulkan_state* Vulkan)
+static int VulkanCreatePipeline(void)
 {
     static unsigned int VertexCode[] =
     {
@@ -912,7 +891,7 @@ static int VulkanCreatePipeline(vulkan_state* Vulkan)
     };
 
     VkShaderModule VertexModule = {0};
-    VkResult VertexModuleResult = vkCreateShaderModule(Vulkan->Device, &VertexModuleInfo, 0, &VertexModule);
+    VkResult VertexModuleResult = vkCreateShaderModule(Vulkan.Device, &VertexModuleInfo, 0, &VertexModule);
 
     VkShaderModuleCreateInfo FragmentModuleInfo =
     {
@@ -922,15 +901,15 @@ static int VulkanCreatePipeline(vulkan_state* Vulkan)
     };
 
     VkShaderModule FragmentModule = {0};
-    VkResult FragmentModuleResult = vkCreateShaderModule(Vulkan->Device, &FragmentModuleInfo, 0, &FragmentModule);
+    VkResult FragmentModuleResult = vkCreateShaderModule(Vulkan.Device, &FragmentModuleInfo, 0, &FragmentModule);
 
     if (VertexModuleResult)     VulkanError("failed to create vertex shader module");
     if (FragmentModuleResult)   VulkanError("failed to create fragment shader module");
 
     if (VertexModuleResult || FragmentModuleResult)
     {
-        vkDestroyShaderModule(Vulkan->Device, VertexModule, 0);
-        vkDestroyShaderModule(Vulkan->Device, FragmentModule, 0);
+        vkDestroyShaderModule(Vulkan.Device, VertexModule, 0);
+        vkDestroyShaderModule(Vulkan.Device, FragmentModule, 0);
         return (0);
     }
 
@@ -1046,7 +1025,7 @@ static int VulkanCreatePipeline(vulkan_state* Vulkan)
     {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &Vulkan->SwapchainFormat.format,
+        .pColorAttachmentFormats = &Vulkan.SwapchainFormat.format,
     };
 
     VkGraphicsPipelineCreateInfo PipelineInfo =
@@ -1055,7 +1034,7 @@ static int VulkanCreatePipeline(vulkan_state* Vulkan)
         .pNext = &PipelineRenderingInfo,
         .stageCount = ARRAY_COUNT(StageInfos),
         .pStages = StageInfos,
-        .layout = Vulkan->PipelineLayout,
+        .layout = Vulkan.PipelineLayout,
         .pVertexInputState = &VertexInputStateInfo,
         .pInputAssemblyState = &InputAssemblyStateInfo,
         .pTessellationState = &TessellationStateInfo,
@@ -1067,27 +1046,27 @@ static int VulkanCreatePipeline(vulkan_state* Vulkan)
         .pDynamicState = &DynamicStateInfo,
     };
 
-    if (vkCreateGraphicsPipelines(Vulkan->Device, 0, 1, &PipelineInfo, 0, &Vulkan->Pipeline))
+    if (vkCreateGraphicsPipelines(Vulkan.Device, 0, 1, &PipelineInfo, 0, &Vulkan.Pipeline))
     {
         VulkanError("failed to create graphics pipeline");
         return (0);
     }
 
-    vkDestroyShaderModule(Vulkan->Device, FragmentModule, 0);
-    vkDestroyShaderModule(Vulkan->Device, VertexModule, 0);
+    vkDestroyShaderModule(Vulkan.Device, FragmentModule, 0);
+    vkDestroyShaderModule(Vulkan.Device, VertexModule, 0);
 
     return (1);
 }
 
-static int VulkanPickSwapchainFormat(vulkan_state* Vulkan)
+static int VulkanPickSwapchainFormat(void)
 {
     // TODO(vak): Suballocate this from arena allocator
     VkSurfaceFormatKHR SurfaceFormats[512] = {0};
     unsigned int SurfaceFormatCount = ARRAY_COUNT(SurfaceFormats);
 
     if (vkGetPhysicalDeviceSurfaceFormatsKHR(
-        Vulkan->PhysicalDevice,
-        Vulkan->Surface,
+        Vulkan.PhysicalDevice,
+        Vulkan.Surface,
         &SurfaceFormatCount,
         SurfaceFormats
     ))
@@ -1103,12 +1082,12 @@ static int VulkanPickSwapchainFormat(vulkan_state* Vulkan)
         if ((SurfaceFormat.format == VK_FORMAT_R8G8B8A8_UNORM) ||
             (SurfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM))
         {
-            Vulkan->SwapchainFormat = SurfaceFormat;
+            Vulkan.SwapchainFormat = SurfaceFormat;
             break;
         }
     }
 
-    if (Vulkan->SwapchainFormat.format == VK_FORMAT_UNDEFINED)
+    if (Vulkan.SwapchainFormat.format == VK_FORMAT_UNDEFINED)
     {
         VulkanError("unable to pick a suitable swapchain format");
         return (0);
@@ -1117,17 +1096,17 @@ static int VulkanPickSwapchainFormat(vulkan_state* Vulkan)
     return (1);
 }
 
-static int VulkanPickPresentMode(vulkan_state* Vulkan)
+static int VulkanPickPresentMode(void)
 {
-    Vulkan->PresentMode = VK_PRESENT_MODE_FIFO_KHR;
+    Vulkan.PresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
     // TODO(vak): Suballocate this from arena allocator
     VkPresentModeKHR PresentModes[64] = {0};
     unsigned int PresentModeCount = ARRAY_COUNT(PresentModes);
 
     if (vkGetPhysicalDeviceSurfacePresentModesKHR(
-        Vulkan->PhysicalDevice,
-        Vulkan->Surface,
+        Vulkan.PhysicalDevice,
+        Vulkan.Surface,
         &PresentModeCount,
         PresentModes
     ))
@@ -1141,7 +1120,7 @@ static int VulkanPickPresentMode(vulkan_state* Vulkan)
 
         if (PresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
         {
-            Vulkan->PresentMode = PresentMode;
+            Vulkan.PresentMode = PresentMode;
             break;
         }
     }
@@ -1150,13 +1129,12 @@ static int VulkanPickPresentMode(vulkan_state* Vulkan)
 }
 
 static unsigned int VulkanSelectMemoryType(
-    vulkan_state*           Vulkan,
     VkMemoryPropertyFlags   DesiredPropertyFlags,
     unsigned int            MemoryTypeBits
 )
 {
     VkPhysicalDeviceMemoryProperties MemoryProperties = {0};
-    vkGetPhysicalDeviceMemoryProperties(Vulkan->PhysicalDevice, &MemoryProperties);
+    vkGetPhysicalDeviceMemoryProperties(Vulkan.PhysicalDevice, &MemoryProperties);
 
     unsigned int Result = ~0u;
 
@@ -1178,7 +1156,6 @@ static unsigned int VulkanSelectMemoryType(
 }
 
 static int VulkanCreateBuffer(
-    vulkan_state*           Vulkan,
     vulkan_buffer*          Buffer,
     size_t                  Size,
     VkBufferUsageFlags      UsageFlags,
@@ -1198,17 +1175,16 @@ static int VulkanCreateBuffer(
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
 
-    if (vkCreateBuffer(Vulkan->Device, &BufferInfo, 0, &Buffer->Buffer))
+    if (vkCreateBuffer(Vulkan.Device, &BufferInfo, 0, &Buffer->Buffer))
     {
         VulkanError("failed to create buffer");
         return (0);
     }
 
     VkMemoryRequirements MemoryRequirements = {0};
-    vkGetBufferMemoryRequirements(Vulkan->Device, Buffer->Buffer, &MemoryRequirements);
+    vkGetBufferMemoryRequirements(Vulkan.Device, Buffer->Buffer, &MemoryRequirements);
 
     unsigned int MemoryTypeIndex = VulkanSelectMemoryType(
-        Vulkan,
         MemoryPropertyFlags,
         MemoryRequirements.memoryTypeBits
     );
@@ -1226,13 +1202,13 @@ static int VulkanCreateBuffer(
         .memoryTypeIndex = MemoryTypeIndex,
     };
 
-    if (vkAllocateMemory(Vulkan->Device, &AllocateInfo, 0, &Buffer->Memory))
+    if (vkAllocateMemory(Vulkan.Device, &AllocateInfo, 0, &Buffer->Memory))
     {
         VulkanError("failed to allocate memory for buffer");
         return (0);
     }
 
-    if (vkBindBufferMemory(Vulkan->Device, Buffer->Buffer, Buffer->Memory, 0))
+    if (vkBindBufferMemory(Vulkan.Device, Buffer->Buffer, Buffer->Memory, 0))
     {
         VulkanError("failed to bind memory to buffer");
         return (0);
@@ -1240,7 +1216,7 @@ static int VulkanCreateBuffer(
 
     if (Mapped)
     {
-        if (vkMapMemory(Vulkan->Device, Buffer->Memory, 0, Buffer->Size, 0, &Buffer->Mapping))
+        if (vkMapMemory(Vulkan.Device, Buffer->Memory, 0, Buffer->Size, 0, &Buffer->Mapping))
         {
             VulkanError("failed to map buffer memory");
             return (0);
@@ -1250,10 +1226,10 @@ static int VulkanCreateBuffer(
     return (1);
 }
 
-static void VulkanDestroyBuffer(vulkan_state* Vulkan, vulkan_buffer* Buffer)
+static void VulkanDestroyBuffer(vulkan_buffer* Buffer)
 {
-    if (Buffer->Mapping)    vkUnmapMemory(Vulkan->Device, Buffer->Memory);
-    if (Buffer->Memory)     vkFreeMemory(Vulkan->Device, Buffer->Memory, 0);
-    if (Buffer->Buffer)     vkDestroyBuffer(Vulkan->Device, Buffer->Buffer, 0);
+    if (Buffer->Mapping)    vkUnmapMemory(Vulkan.Device, Buffer->Memory);
+    if (Buffer->Memory)     vkFreeMemory(Vulkan.Device, Buffer->Memory, 0);
+    if (Buffer->Buffer)     vkDestroyBuffer(Vulkan.Device, Buffer->Buffer, 0);
 }
 

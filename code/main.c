@@ -30,10 +30,9 @@ int main(int ArgCount, char* Args[])
         return (1);
     }
 
-    vulkan_state Vulkan = {0};
-    if (!VulkanSetup(&Vulkan, &(vulkan_setup_info){.Wayland = &Wayland}))
+    if (!VulkanSetup())
     {
-        VulkanShutdown(&Vulkan);
+        VulkanShutdown();
         return (1);
     }
 
@@ -75,7 +74,7 @@ int main(int ArgCount, char* Args[])
 
         if (WaylandShouldResize())
         {
-            if (!VulkanResize(&Vulkan, WaylandGetWidth(), WaylandGetHeight()))
+            if (!VulkanResize(WaylandGetWidth(), WaylandGetHeight()))
                 break;
         }
 
@@ -87,7 +86,7 @@ int main(int ArgCount, char* Args[])
         UpdateWorld(&Platform, &World);
         RenderWorld(&World, &RenderSpec, &RenderBatch);
 
-        if (!VulkanRender(&Vulkan, &RenderSpec, &RenderBatch))
+        if (!VulkanRender(&RenderSpec, &RenderBatch))
             break;
 
         WaylandPresent();
@@ -102,7 +101,7 @@ int main(int ArgCount, char* Args[])
         clock_gettime(CLOCK_MONOTONIC, &FrameBegin);
     }
 
-    VulkanShutdown(&Vulkan);
+    VulkanShutdown();
     WaylandShutdown();
 
     return (0);
