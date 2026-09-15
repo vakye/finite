@@ -49,6 +49,7 @@ typedef struct
     VkPipeline                  Pipeline;
 
     vulkan_buffer               VertexBuffer;
+    vulkan_buffer               IndexBuffer;
 
     VkSwapchainKHR              Swapchain; 
     VkExtent2D                  SwapchainExtent;
@@ -115,10 +116,27 @@ static b32 VulkanSetup(void)
     if (!VulkanCreatePipelineLayout())      return (false);
     if (!VulkanCreatePipeline())            return (false);
 
+    u32 MaxRectPerDraw   = 16384;
+    u32 VertexBufferSize = MaxRectPerDraw * 4 * sizeof(vulkan_vertex);
+    u32 IndexBufferSize  = MaxRectPerDraw * 6 * sizeof(u32);
+
     if (!VulkanCreateBuffer(
         &Vulkan.VertexBuffer,
-        2 * 1024 * 1024,
+        VertexBufferSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        true
+    ))
+    {
+        return (false);
+    }
+
+    if (!VulkanCreateBuffer(
+        &Vulkan.IndexBuffer,
+        IndexBufferSize,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
@@ -143,6 +161,7 @@ static void VulkanShutdown(void)
         vkDestroySwapchainKHR(Vulkan.Device, Vulkan.Swapchain, 0);
     }
 
+    VulkanDestroyBuffer(&Vulkan.IndexBuffer);
     VulkanDestroyBuffer(&Vulkan.VertexBuffer);
 
     if (Vulkan.Pipeline)               vkDestroyPipeline(Vulkan.Device, Vulkan.Pipeline, 0);
@@ -273,15 +292,30 @@ static b32 VulkanRender(void)
     render_batch Batch = RenderGetBatch();
 
     usize MaxVertexCount = Vulkan.VertexBuffer.Size / sizeof(vulkan_vertex);
-    usize VerticesNeeded = Batch.RectCount * 6;
+    usize MaxIndexCount  = Vulkan.IndexBuffer.Size  / sizeof(u32);
+
+    usize VerticesNeeded = Batch.RectCount * 4;
+    usize IndicesNeeded  = Batch.RectCount * 6;
+
+    b32 NotEnoughSpace = false;
 
     if (MaxVertexCount < VerticesNeeded)
     {
-        VulkanError("vertex buffer isn't large enough for render_batch");
-        return (false);
+        VulkanError("vertex buffer isn't large enough for render batch");
+        NotEnoughSpace = true;
     }
 
+    if (MaxIndexCount < IndicesNeeded)
+    {
+        VulkanError("index buffer isn't large enough for render batch");
+        NotEnoughSpace = true;
+    }
+
+    if (NotEnoughSpace)
+        return (false);
+
     u32 VertexCount = 0;
+    u32 IndexCount  = 0;
 
     for (u32 RectIndex = 0; RectIndex < Batch.RectCount; RectIndex++)
     {
@@ -290,17 +324,24 @@ static b32 VulkanRender(void)
         v2 Min = RenderRect->Rect.Min;
         v2 Max = RenderRect->Rect.Max;
 
-        vulkan_vertex* V = (vulkan_vertex*)Vulkan.VertexBuffer.Mapping + VertexCount;
+        vulkan_vertex*  V = (vulkan_vertex*)Vulkan.VertexBuffer.Mapping + VertexCount;
+        u32*            I = (u32*)          Vulkan.IndexBuffer.Mapping  + IndexCount;
 
         V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
         V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(1.0f, 0.0f), RenderRect->Color};
         V[2] = (vulkan_vertex){V2(Max.X, Max.Y), V2(1.0f, 1.0f), RenderRect->Color};
+        V[3] = (vulkan_vertex){V2(Min.X, Max.Y), V2(0.0f, 1.0f), RenderRect->Color};
 
-        V[3] = (vulkan_vertex){V2(Max.X, Max.Y), V2(1.0f, 1.0f), RenderRect->Color};
-        V[4] = (vulkan_vertex){V2(Min.X, Max.Y), V2(0.0f, 1.0f), RenderRect->Color};
-        V[5] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
+        I[0] = VertexCount + 0;
+        I[1] = VertexCount + 1;
+        I[2] = VertexCount + 2;
 
-        VertexCount += 6;
+        I[3] = VertexCount + 2;
+        I[4] = VertexCount + 3;
+        I[5] = VertexCount + 0;
+
+        VertexCount += 4;
+        IndexCount  += 6;
     }
 
     vulkan_push_constants PushConstants =
@@ -444,7 +485,8 @@ static b32 VulkanRender(void)
         &PushConstants
     );
 
-    vkCmdDraw(CommandBuffer, VertexCount, 1, 0, 0);
+    vkCmdBindIndexBuffer(CommandBuffer, Vulkan.IndexBuffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(CommandBuffer, IndexCount, 1, 0, 0, 0);
 
     vkCmdEndRendering(CommandBuffer);
 
