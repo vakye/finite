@@ -29,6 +29,16 @@ typedef struct
 
 typedef struct
 {
+    VkImage         Image;
+    VkDeviceMemory  Memory;
+    VkImageView     ImageView;
+    VkFormat        Format;
+    u32             Width, Height;
+    VkSampler       Sampler;
+} vulkan_texture;
+
+typedef struct
+{
     u32                         VersionOfAPI;
     VkInstance                  Instance;
     VkSurfaceKHR                Surface;
@@ -48,8 +58,13 @@ typedef struct
     VkPipelineLayout            PipelineLayout;
     VkPipeline                  Pipeline;
 
+    VkSampler                   DefaultSampler;
+
+    vulkan_buffer               TransferBuffer;
     vulkan_buffer               VertexBuffer;
     vulkan_buffer               IndexBuffer;
+
+    vulkan_texture              WhiteTexture;
 
     VkSwapchainKHR              Swapchain; 
     VkExtent2D                  SwapchainExtent;
@@ -88,6 +103,7 @@ static b32 VulkanPickPresentMode        (void);
 static b32 VulkanCreateSetLayout        (void);
 static b32 VulkanCreatePipelineLayout   (void);
 static b32 VulkanCreatePipeline         (void);
+static b32 VulkanCreateSamplers         (void);
 
 static b32 VulkanCreateBuffer(
     vulkan_buffer*          Buffer,
@@ -99,8 +115,22 @@ static b32 VulkanCreateBuffer(
 
 static void VulkanDestroyBuffer(vulkan_buffer* Buffer);
 
+static b32 VulkanCreateTexture(
+    vulkan_texture*         Texture,
+    VkSampler               Sampler,
+    u32                     Width,
+    u32                     Height,
+    VkFormat                Format
+);
+
+static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels);
+
+static void VulkanDestroyTexture(vulkan_texture* Texture);
+
 static b32 VulkanSetup(void)
 {
+    // NOTE(vak): Main objects
+
     if (!VulkanCreateInstance())            return (false);
     if (!VulkanCreateSurface())             return (false);
     if (!VulkanPickPhysicalDevice())        return (false);
@@ -115,6 +145,22 @@ static b32 VulkanSetup(void)
     if (!VulkanCreateSetLayout())           return (false);
     if (!VulkanCreatePipelineLayout())      return (false);
     if (!VulkanCreatePipeline())            return (false);
+    if (!VulkanCreateSamplers())            return (false);
+
+    // NOTE(vak): Buffers
+
+    if (!VulkanCreateBuffer(
+        &Vulkan.TransferBuffer,
+        2 * 1024 * 1024,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        true
+    ))
+    {
+        return (false);
+    }
 
     u32 MaxRectPerDraw   = 16384;
     u32 VertexBufferSize = MaxRectPerDraw * 4 * sizeof(vulkan_vertex);
@@ -146,6 +192,28 @@ static b32 VulkanSetup(void)
         return (false);
     }
 
+    // NOTE(vak): Textures
+
+    u32 WhiteImage[2 * 2] =
+    {
+        0xFFFFFFFF, 0xFFFFFFFF,
+        0xFFFFFFFF, 0xFFFFFFFF,
+    };
+
+    if (!VulkanCreateTexture(
+        &Vulkan.WhiteTexture,
+        Vulkan.DefaultSampler,
+        2, 2, VK_FORMAT_R8G8B8A8_UNORM
+    ))
+    {
+        return (false);
+    }
+
+    if (!VulkanUploadTexture(&Vulkan.WhiteTexture, WhiteImage))
+    {
+        return (false);
+    }
+
     // NOTE(vak): Swapchain will be created with VulkanResize()
 
     return (true);
@@ -161,22 +229,26 @@ static void VulkanShutdown(void)
         vkDestroySwapchainKHR(Vulkan.Device, Vulkan.Swapchain, 0);
     }
 
+    VulkanDestroyTexture(&Vulkan.WhiteTexture);
+
     VulkanDestroyBuffer(&Vulkan.IndexBuffer);
     VulkanDestroyBuffer(&Vulkan.VertexBuffer);
+    VulkanDestroyBuffer(&Vulkan.TransferBuffer);
 
-    if (Vulkan.Pipeline)               vkDestroyPipeline(Vulkan.Device, Vulkan.Pipeline, 0);
-    if (Vulkan.PipelineLayout)         vkDestroyPipelineLayout(Vulkan.Device, Vulkan.PipelineLayout, 0);
-    if (Vulkan.SetLayout)              vkDestroyDescriptorSetLayout(Vulkan.Device, Vulkan.SetLayout, 0);
+    if (Vulkan.DefaultSampler)          vkDestroySampler(Vulkan.Device, Vulkan.DefaultSampler, 0);
+    if (Vulkan.Pipeline)                vkDestroyPipeline(Vulkan.Device, Vulkan.Pipeline, 0);
+    if (Vulkan.PipelineLayout)          vkDestroyPipelineLayout(Vulkan.Device, Vulkan.PipelineLayout, 0);
+    if (Vulkan.SetLayout)               vkDestroyDescriptorSetLayout(Vulkan.Device, Vulkan.SetLayout, 0);
 
-    if (Vulkan.SubmitSemaphore)        vkDestroySemaphore(Vulkan.Device, Vulkan.SubmitSemaphore, 0);
-    if (Vulkan.AcquireSemaphore)       vkDestroySemaphore(Vulkan.Device, Vulkan.AcquireSemaphore, 0);
+    if (Vulkan.SubmitSemaphore)         vkDestroySemaphore(Vulkan.Device, Vulkan.SubmitSemaphore, 0);
+    if (Vulkan.AcquireSemaphore)        vkDestroySemaphore(Vulkan.Device, Vulkan.AcquireSemaphore, 0);
 
-    if (Vulkan.CommandBuffer)          vkFreeCommandBuffers(Vulkan.Device, Vulkan.CommandPool, 1, &Vulkan.CommandBuffer);
-    if (Vulkan.CommandPool)            vkDestroyCommandPool(Vulkan.Device, Vulkan.CommandPool, 0);
+    if (Vulkan.CommandBuffer)           vkFreeCommandBuffers(Vulkan.Device, Vulkan.CommandPool, 1, &Vulkan.CommandBuffer);
+    if (Vulkan.CommandPool)             vkDestroyCommandPool(Vulkan.Device, Vulkan.CommandPool, 0);
 
-    if (Vulkan.Device)                 vkDestroyDevice(Vulkan.Device, 0);
-    if (Vulkan.Surface)                vkDestroySurfaceKHR(Vulkan.Instance, Vulkan.Surface, 0);
-    if (Vulkan.Instance)               vkDestroyInstance(Vulkan.Instance, 0);
+    if (Vulkan.Device)                  vkDestroyDevice(Vulkan.Device, 0);
+    if (Vulkan.Surface)                 vkDestroySurfaceKHR(Vulkan.Instance, Vulkan.Surface, 0);
+    if (Vulkan.Instance)                vkDestroyInstance(Vulkan.Instance, 0);
 }
 
 static b32 VulkanResize(u32 Width, u32 Height)
@@ -465,6 +537,20 @@ static b32 VulkanRender(void)
                 .range = Vulkan.VertexBuffer.Size,
             },
         },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = 0,
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &(VkDescriptorImageInfo)
+            {
+                .sampler = Vulkan.WhiteTexture.Sampler,
+                .imageView = Vulkan.WhiteTexture.ImageView,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+        },
     };
 
     vkCmdPushDescriptorSet(
@@ -539,7 +625,7 @@ static b32 VulkanRender(void)
 
     if (vkQueueSubmit(Vulkan.Queue, 1, &SubmitInfo, 0))
     {
-        VulkanError("failed to submit");
+        VulkanError("failed to submit command buffer for rendering");
         return (false);
     }
 
@@ -871,6 +957,12 @@ static b32 VulkanCreateSetLayout(void)
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         },
+        {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
     };
 
     VkDescriptorSetLayoutCreateInfo SetLayoutInfo =
@@ -964,6 +1056,12 @@ static b32 VulkanCreatePipeline(void)
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        },
+        {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     };
 
@@ -1098,6 +1196,28 @@ static b32 VulkanCreatePipeline(void)
 
     vkDestroyShaderModule(Vulkan.Device, FragmentModule, 0);
     vkDestroyShaderModule(Vulkan.Device, VertexModule, 0);
+
+    return (true);
+}
+
+static b32 VulkanCreateSamplers(void)
+{
+    VkSamplerCreateInfo DefaultSamplerInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .minFilter = VK_FILTER_NEAREST,
+        .magFilter = VK_FILTER_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    };
+
+    if (vkCreateSampler(Vulkan.Device, &DefaultSamplerInfo, 0, &Vulkan.DefaultSampler))
+    {
+        VulkanError("failed to create default sampler");
+        return (false);
+    }
 
     return (true);
 }
@@ -1275,5 +1395,264 @@ static void VulkanDestroyBuffer(vulkan_buffer* Buffer)
     if (Buffer->Mapping)    vkUnmapMemory(Vulkan.Device, Buffer->Memory);
     if (Buffer->Memory)     vkFreeMemory(Vulkan.Device, Buffer->Memory, 0);
     if (Buffer->Buffer)     vkDestroyBuffer(Vulkan.Device, Buffer->Buffer, 0);
+}
+
+static b32 VulkanCreateTexture(
+    vulkan_texture*         Texture,
+    VkSampler               Sampler,
+    u32                     Width,
+    u32                     Height,
+    VkFormat                Format
+)
+{
+    memset(Texture, 0, sizeof(vulkan_texture));
+
+    Texture->Width = Width;
+    Texture->Height = Height;
+    Texture->Format = Format;
+    Texture->Sampler = Sampler;
+
+    VkImageCreateInfo ImageInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = Format,
+        .extent = {.width = Width, .height = Height, .depth = 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    if (vkCreateImage(Vulkan.Device, &ImageInfo, 0, &Texture->Image))
+    {
+        VulkanError("failed to create image for texture");
+        return (false);
+    }
+
+    VkMemoryRequirements MemoryRequirements = {0};
+    vkGetImageMemoryRequirements(Vulkan.Device, Texture->Image, &MemoryRequirements);
+
+    u32 MemoryTypeIndex = VulkanSelectMemoryType(
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        MemoryRequirements.memoryTypeBits
+    );
+
+    if (MemoryTypeIndex == U32Max)
+    {
+        VulkanError("failed to select suitable memory type for buffer");
+        return (false);
+    }
+
+    VkMemoryAllocateInfo AllocateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = MemoryRequirements.size,
+        .memoryTypeIndex = MemoryTypeIndex,
+    };
+
+    if (vkAllocateMemory(Vulkan.Device, &AllocateInfo, 0, &Texture->Memory))
+    {
+        VulkanError("failed to allocate memory for buffer");
+        return (false);
+    }
+
+    if (vkBindImageMemory(Vulkan.Device, Texture->Image, Texture->Memory, 0))
+    {
+        VulkanError("failed to bind memory to texture image");
+        return (false);
+    }
+
+    VkImageViewCreateInfo ImageViewInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = Texture->Image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = Texture->Format,
+        .components =
+        {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange =
+        {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        },
+    };
+
+    if (vkCreateImageView(Vulkan.Device, &ImageViewInfo, 0, &Texture->ImageView))
+    {
+        VulkanError("failed to create image view for texture");
+        return (false);
+    }
+
+    return (true);
+}
+
+static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
+{
+    u32 BytesPerPixel = 0;
+
+    switch (Texture->Format)
+    {
+        default:
+            VulkanError("unknown format in VulkanUploadTexture()");
+            return (false);
+
+        case VK_FORMAT_R8G8B8A8_UNORM: BytesPerPixel = 4; break;
+    }
+
+    usize UploadSize = Texture->Width * Texture->Height * BytesPerPixel;
+
+    if (Vulkan.TransferBuffer.Size < UploadSize)
+    {
+        VulkanError("transfer buffer is not large enough to upload texture");
+        return (false);
+    }
+
+    memcpy(Vulkan.TransferBuffer.Mapping, Pixels, UploadSize);
+
+    if (vkDeviceWaitIdle(Vulkan.Device))
+    {
+        VulkanError("failed to wait until device idle before uploading texture");
+        return (false);
+    }
+
+    VkCommandBufferBeginInfo BeginInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    if (vkResetCommandBuffer(Vulkan.CommandBuffer, 0))
+    {
+        VulkanError("failed to reset command buffer");
+        return (false);
+    }
+
+    if (vkBeginCommandBuffer(Vulkan.CommandBuffer, &BeginInfo))
+    {
+        VulkanError("failed to begin command buffer");
+        return (false);
+    }
+
+    VkImageMemoryBarrier TransferBarrier =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_NONE,
+        .dstAccessMask = VK_ACCESS_NONE,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = Texture->Image,
+        .subresourceRange =
+        {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        },
+    };
+
+    vkCmdPipelineBarrier(
+        Vulkan.CommandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT,
+        0, 0, 0, 0,
+        1, &TransferBarrier
+    );
+
+    VkBufferImageCopy CopyRegion =
+    {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource =
+        {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = {0},
+        .imageExtent = {.width = Texture->Width, .height = Texture->Height, .depth = 1},
+    };
+
+    vkCmdCopyBufferToImage(
+        Vulkan.CommandBuffer,
+        Vulkan.TransferBuffer.Buffer,
+        Texture->Image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &CopyRegion
+    );
+
+    VkImageMemoryBarrier TextureReadyBarrier =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_NONE,
+        .dstAccessMask = VK_ACCESS_NONE,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = Texture->Image,
+        .subresourceRange =
+        {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        },
+    };
+
+    vkCmdPipelineBarrier(
+        Vulkan.CommandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT,
+        0, 0, 0, 0,
+        1, &TextureReadyBarrier
+    );
+
+    if (vkEndCommandBuffer(Vulkan.CommandBuffer))
+    {
+        VulkanError("failed to end command buffer");
+        return (false);
+    }
+
+    VkSubmitInfo SubmitInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &Vulkan.CommandBuffer,
+    };
+
+    if (vkQueueSubmit(Vulkan.Queue, 1, &SubmitInfo, 0))
+    {
+        VulkanError("failed to submit command buffer for uploading texture");
+        return (false);
+    }
+
+    if (vkDeviceWaitIdle(Vulkan.Device))
+    {
+        VulkanError("failed to wait until device idle after uploading texture");
+        return (false);
+    }
+
+    return (true);
+}
+
+static void VulkanDestroyTexture(vulkan_texture* Texture)
+{
+    if (Texture->ImageView)     vkDestroyImageView(Vulkan.Device, Texture->ImageView, 0);
+    if (Texture->Memory)        vkFreeMemory(Vulkan.Device, Texture->Memory, 0);
+    if (Texture->Image)         vkDestroyImage(Vulkan.Device, Texture->Image, 0);
 }
 
