@@ -98,7 +98,7 @@
 
     [x] - Open a Wayland window
     [x] - Render colored rectangles with Vulkan
-    [ ] - Vulkan textures + render textured rectangles
+    [+] - Vulkan textures + render textured rectangles
     [ ] - Load raw pixel image into a texture
     [ ] - Draw text using a simple font atlas
 
