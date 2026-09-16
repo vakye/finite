@@ -57,8 +57,12 @@ s32 main(s32 ArgCount, char* Args[])
         WaylandPollEvents();
 
         if (WaylandShouldResize())
+        {
             if (!VulkanResize(WaylandGetWidth(), WaylandGetHeight()))
                 break;
+
+            WaylandNotifyResized();
+        }
 
         GameUpdateAndRender(DeltaTime, WaylandGetWidth(), WaylandGetHeight());
 

@@ -3,14 +3,15 @@
 
 // NOTE(vak): Cheatsheet
 
-static b32  WaylandSetup        (void);
-static void WaylandShutdown     (void);
-static b32  WaylandIsClosed     (void);
-static b32  WaylandShouldResize (void);
-static u32  WaylandGetWidth     (void);
-static u32  WaylandGetHeight    (void);
-static void WaylandPollEvents   (void);
-static void WaylandPresent      (void);
+static b32  WaylandSetup            (void);
+static void WaylandShutdown         (void);
+static b32  WaylandIsClosed         (void);
+static b32  WaylandShouldResize     (void);
+static void WaylandNotifyResized    (void);
+static u32  WaylandGetWidth         (void);
+static u32  WaylandGetHeight        (void);
+static void WaylandPollEvents       (void);
+static void WaylandPresent          (void);
 
 // NOTE(vak): Implementation
 
@@ -93,6 +94,12 @@ static b32 WaylandIsClosed(void)
 static b32 WaylandShouldResize(void)
 {
     return (Wayland.ReadyToResize);
+}
+
+static void WaylandNotifyResized(void)
+{
+    Wayland.ReadyToResize   = false;
+    Wayland.IsResizing      = false;
 }
 
 static u32 WaylandGetWidth(void)
@@ -265,6 +272,19 @@ static void WaylandKeyboardKey(
         case XKB_KEY_s: case XKB_KEY_Down:  InputReportButton(InputButton_MoveDown,     IsDown);    break;
         case XKB_KEY_d: case XKB_KEY_Right: InputReportButton(InputButton_MoveRight,    IsDown);    break;
         case XKB_KEY_space:                 InputReportButton(InputButton_Shoot,        IsDown);    break;
+
+        case XKB_KEY_F11:
+        {
+            if (IsDown)
+            {
+                if (!Wayland.IsFullscreen)
+                    xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
+                else
+                    xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
+
+                Wayland.IsFullscreen = !Wayland.IsFullscreen;
+            }
+        } break;
     }
 }
 
