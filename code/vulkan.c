@@ -324,8 +324,8 @@ static b32 VulkanRender(void)
         v2 Min = RenderRect->Rect.Min;
         v2 Max = RenderRect->Rect.Max;
 
-        vulkan_vertex*  V = (vulkan_vertex*)Vulkan.VertexBuffer.Mapping + VertexCount;
-        u32*            I = (u32*)          Vulkan.IndexBuffer.Mapping  + IndexCount;
+        vulkan_vertex*  V = (vulkan_vertex*) Vulkan.VertexBuffer.Mapping + VertexCount;
+        u32*            I = (u32*)           Vulkan.IndexBuffer.Mapping  + IndexCount;
 
         V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
         V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(1.0f, 0.0f), RenderRect->Color};

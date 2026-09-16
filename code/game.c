@@ -37,19 +37,36 @@ typedef struct
     v4                  Color;
 } bullet;
 
-typedef struct
+typedef enum
 {
-    b32 Alive;
-    v2  RestP;
-    v2  P;
-    v2  DP;
-    v2  Size;
-    f32 CurrentHealth;
-    f32 ShootTimer;
+    EnemyKind_Grunt     = 0,
+    EnemyKind_Mover,
+    EnemyKind_Armored,
+    EnemyKind_COUNT,
+} enemy_kind;
 
-    f32 MaxHealth;
-    f32 ShootCooldown;
-} enemy;
+typedef struct enemy enemy;
+
+typedef void enemy_think(enemy* Enemy, f32 DeltaTime);
+
+struct enemy
+{
+    enemy_kind  Kind;
+    b32         Alive;
+    v2          RestP;
+    v2          P;
+    v2          DP;
+    v2          Size;
+    f32         CurrentHealth;
+    f32         ShootTimer;
+    f32         MaxHealth;
+    f32         ShootCooldown;
+
+    union
+    {
+        struct { f32 ShuffleTimer; } Mover;
+    };
+};
 
 typedef struct
 {
@@ -101,7 +118,7 @@ static void GameSpawnBullet(f32 Damage, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color, 
     }
 }
 
-static void GameSpawnEnemy(v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 ShootCooldown)
+static void GameSpawnEnemy(enemy_kind Kind, v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 ShootCooldown)
 {
     enemy* Enemy = 0;
 
@@ -117,6 +134,9 @@ static void GameSpawnEnemy(v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 Sh
 
     if (Enemy)
     {
+        memset(Enemy, 0, sizeof(enemy));
+
+        Enemy->Kind             = Kind;
         Enemy->Alive            = true;
         Enemy->RestP            = RestP;
         Enemy->P                = P;
@@ -124,9 +144,25 @@ static void GameSpawnEnemy(v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 Sh
         Enemy->Size             = Size;
         Enemy->CurrentHealth    = MaxHealth;
         Enemy->ShootTimer       = ShootCooldown * RandomUnilateral(&Game.Entropy);
-
         Enemy->MaxHealth        = MaxHealth;
         Enemy->ShootCooldown    = ShootCooldown;
+    }
+}
+
+static void GameEnemyMoverThink(enemy* Enemy, f32 DeltaTime)
+{
+    Enemy->Mover.ShuffleTimer -= DeltaTime;
+
+    if (Enemy->Mover.ShuffleTimer <= 0.0f)
+    {
+        player* Player = &Game.Player;
+
+        Enemy->RestP = V2(
+            Player->P.X + 1.0f * RandomBilateral(&Game.Entropy),
+            6.0f        + 2.0f * RandomBilateral(&Game.Entropy)
+        );
+
+        Enemy->Mover.ShuffleTimer = 1.2f;
     }
 }
 
@@ -298,6 +334,17 @@ static enemy* GameGetEnemyHitByBullet(bullet* Bullet)
     return (HitEnemy);
 }
 
+static b32 GameIsPlayerHittingEnemy(enemy* Enemy)
+{
+    player* Player = &Game.Player;
+
+    rect2 EnemyRect  = R2CenterSize(Enemy->P,  Enemy->Size);
+    rect2 PlayerRect = R2CenterSize(Player->P, Player->Size);
+
+    b32 Result = R2Intersects(PlayerRect, EnemyRect);
+    return (Result);
+}
+
 static b32 GameAreAllEnemiesDead(void)
 {
     b32 AllDead = true;
@@ -318,9 +365,9 @@ static b32 GameAreAllEnemiesDead(void)
 
 static void GameStartNewStage(void)
 {
-    usize EnemyCount = 10 + 5*Game.Stage;
+    usize GruntCount = 10 + 1*Game.Stage;
 
-    for (usize Index = 0; Index < EnemyCount; Index++)
+    for (usize Index = 0; Index < GruntCount; Index++)
     {
         v2 RandomRestP = V2(
             0.0f + 6.0f * RandomBilateral(&Game.Entropy),
@@ -337,7 +384,51 @@ static void GameStartNewStage(void)
         f32 EnemyHealth = 100.0f;
         f32 ShootCooldown = 1.7f;
 
-        GameSpawnEnemy(RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
+        GameSpawnEnemy(EnemyKind_Grunt, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
+    }
+
+    usize MoverCount = Game.Stage;
+
+    for (usize Index = 0; Index < MoverCount; Index++)
+    {
+        v2 RandomRestP = V2(
+            0.0f + 6.0f * RandomBilateral(&Game.Entropy),
+            6.0f + 2.0f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 RandomP = V2(
+            0.0f  + 6.0f * RandomBilateral(&Game.Entropy),
+            20.0f + 2.0f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 EnemySize = V2(0.4f, 0.4f);
+
+        f32 EnemyHealth = 120.0f;
+        f32 ShootCooldown = 1.2f;
+
+        GameSpawnEnemy(EnemyKind_Mover, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
+    }
+
+    usize ArmoredCount = Maximum(0, (ssize)Game.Stage - 1);
+
+    for (usize Index = 0; Index < ArmoredCount; Index++)
+    {
+        v2 RandomRestP = V2(
+            0.0f + 6.0f * RandomBilateral(&Game.Entropy),
+            6.0f + 2.0f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 RandomP = V2(
+            0.0f  + 6.0f * RandomBilateral(&Game.Entropy),
+            20.0f + 2.0f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 EnemySize = V2(0.8f, 0.6f);
+
+        f32 EnemyHealth = 300.0f;
+        f32 ShootCooldown = 2.1f;
+
+        GameSpawnEnemy(EnemyKind_Armored, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
     }
 
     Game.Stage++;
@@ -494,6 +585,27 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         if (!Enemy->Alive)
             continue;
 
+        if (GameIsPlayerHittingEnemy(Enemy))
+        {
+            float PlayerHealth = Maximum(0, Player->CurrentHealth);
+
+            Player->CurrentHealth -= Maximum(0, Enemy->CurrentHealth);
+            Enemy->CurrentHealth  -= PlayerHealth;
+            Enemy->Alive           = (Enemy->CurrentHealth >= 0.0f);
+        }
+
+        static enemy_think* ThinkFor[EnemyKind_COUNT] =
+        {
+            [EnemyKind_Grunt]   = 0,
+            [EnemyKind_Mover]   = GameEnemyMoverThink,
+            [EnemyKind_Armored] = 0,
+        };
+
+        if (ThinkFor[Enemy->Kind])
+        {
+            ThinkFor[Enemy->Kind](Enemy, DeltaTime);
+        }
+
         Enemy->ShootTimer -= DeltaTime;
         Enemy->ShootTimer = Maximum(0.0f, Enemy->ShootTimer);
 
@@ -573,7 +685,14 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         if (!Enemy->Alive)
             continue;
 
-        RenderRect(R2CenterSize(Enemy->P, Enemy->Size), V4(0.3f, 0.4f, 0.9f, 1.0f));
+        static v4 EnemyColors[EnemyKind_COUNT] =
+        {
+            [EnemyKind_Grunt]   = {.E = {0.3f, 0.4f, 0.9f, 1.0f}},
+            [EnemyKind_Mover]   = {.E = {0.9f, 0.9f, 0.2f, 1.0f}},
+            [EnemyKind_Armored] = {.E = {0.8f, 0.8f, 0.8f, 1.0f}},
+        };
+
+        RenderRect(R2CenterSize(Enemy->P, Enemy->Size), EnemyColors[Enemy->Kind]);
 
         v2 HealthBarSize = V2(0.75f, 0.1f);
 
