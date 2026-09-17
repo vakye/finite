@@ -6,7 +6,26 @@
 
 // NOTE(vak): Cheatsheet
 
-static b32  VulkanSetup     (void);
+typedef enum
+{
+    VulkanPixelKind_RGBA    = 0,
+    VulkanPixelKind_Alpha,
+} vulkan_pixel_kind;
+
+typedef struct
+{
+    vulkan_pixel_kind   PixelKind;
+    void*               Pixels;
+    u32                 Width;
+    u32                 Height;
+} vulkan_texture_load_info;
+
+typedef struct
+{
+    vulkan_texture_load_info LoadInfos[GameTexture_COUNT];
+} vulkan_texture_load_set;
+
+static b32  VulkanSetup     (vulkan_texture_load_set* TextureLoadSet);
 static void VulkanShutdown  (void);
 static b32  VulkanResize    (u32 Width, u32 Height);
 static b32  VulkanRender    (void);
@@ -64,7 +83,7 @@ typedef struct
     vulkan_buffer               VertexBuffer;
     vulkan_buffer               IndexBuffer;
 
-    vulkan_texture              WhiteTexture;
+    vulkan_texture              Textures[GameTexture_COUNT];
 
     VkSwapchainKHR              Swapchain; 
     VkExtent2D                  SwapchainExtent;
@@ -75,15 +94,11 @@ typedef struct
 
 typedef struct
 {
-    v2 Position;
-    v2 TexCoord;
-    v4 Color;
+    v2  Position;
+    v2  TexCoord;
+    v4  Color;
+    u32 TextureIndex;
 } vulkan_vertex;
-
-typedef struct
-{
-    m4x4 Projection;
-} vulkan_push_constants;
 
 static vulkan_state Vulkan = {0};
 
@@ -118,16 +133,16 @@ static void VulkanDestroyBuffer(vulkan_buffer* Buffer);
 static b32 VulkanCreateTexture(
     vulkan_texture*         Texture,
     VkSampler               Sampler,
+    vulkan_pixel_kind       PixelKind,
     u32                     Width,
-    u32                     Height,
-    VkFormat                Format
+    u32                     Height
 );
 
 static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels);
 
 static void VulkanDestroyTexture(vulkan_texture* Texture);
 
-static b32 VulkanSetup(void)
+static b32 VulkanSetup(vulkan_texture_load_set* TextureLoadSet)
 {
     // NOTE(vak): Main objects
 
@@ -194,24 +209,26 @@ static b32 VulkanSetup(void)
 
     // NOTE(vak): Textures
 
-    u32 WhiteImage[2 * 2] =
+    for (usize Index = 0; Index < ArrayCount(TextureLoadSet->LoadInfos); Index++)
     {
-        0xFFFFFFFF, 0xFFFFFFFF,
-        0xFFFFFFFF, 0xFFFFFFFF,
-    };
+        vulkan_texture_load_info* LoadInfo = TextureLoadSet->LoadInfos + Index;
+        vulkan_texture* Texture = Vulkan.Textures + Index;
 
-    if (!VulkanCreateTexture(
-        &Vulkan.WhiteTexture,
-        Vulkan.DefaultSampler,
-        2, 2, VK_FORMAT_R8G8B8A8_UNORM
-    ))
-    {
-        return (false);
-    }
+        if (!VulkanCreateTexture(
+            Texture,
+            Vulkan.DefaultSampler,
+            LoadInfo->PixelKind,
+            LoadInfo->Width,
+            LoadInfo->Height
+        ))
+        {
+            return (false);
+        }
 
-    if (!VulkanUploadTexture(&Vulkan.WhiteTexture, WhiteImage))
-    {
-        return (false);
+        if (!VulkanUploadTexture(Texture, LoadInfo->Pixels))
+        {
+            return (false);
+        }
     }
 
     // NOTE(vak): Swapchain will be created with VulkanResize()
@@ -229,7 +246,8 @@ static void VulkanShutdown(void)
         vkDestroySwapchainKHR(Vulkan.Device, Vulkan.Swapchain, 0);
     }
 
-    VulkanDestroyTexture(&Vulkan.WhiteTexture);
+    for (usize Index = 0; Index < ArrayCount(Vulkan.Textures); Index++)
+        VulkanDestroyTexture(Vulkan.Textures + Index);
 
     VulkanDestroyBuffer(&Vulkan.IndexBuffer);
     VulkanDestroyBuffer(&Vulkan.VertexBuffer);
@@ -393,16 +411,21 @@ static b32 VulkanRender(void)
     {
         render_rect* RenderRect = Batch.Rects + RectIndex;
 
-        v2 Min = RenderRect->Rect.Min;
-        v2 Max = RenderRect->Rect.Max;
+        v2 Min              = RenderRect->Rect.Min;
+        v2 Max              = RenderRect->Rect.Max;
+        v4 Color            = RenderRect->Color;
+
+        v2 TexMin           = RenderRect->RectUV.Min;
+        v2 TexMax           = RenderRect->RectUV.Max;
+        u32 TextureIndex    = RenderRect->Texture;
 
         vulkan_vertex*  V = (vulkan_vertex*) Vulkan.VertexBuffer.Mapping + VertexCount;
         u32*            I = (u32*)           Vulkan.IndexBuffer.Mapping  + IndexCount;
 
-        V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(0.0f, 0.0f), RenderRect->Color};
-        V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(1.0f, 0.0f), RenderRect->Color};
-        V[2] = (vulkan_vertex){V2(Max.X, Max.Y), V2(1.0f, 1.0f), RenderRect->Color};
-        V[3] = (vulkan_vertex){V2(Min.X, Max.Y), V2(0.0f, 1.0f), RenderRect->Color};
+        V[0] = (vulkan_vertex){V2(Min.X, Min.Y), V2(TexMin.U, TexMin.V), Color, TextureIndex};
+        V[1] = (vulkan_vertex){V2(Max.X, Min.Y), V2(TexMax.U, TexMin.V), Color, TextureIndex};
+        V[2] = (vulkan_vertex){V2(Max.X, Max.Y), V2(TexMax.U, TexMax.V), Color, TextureIndex};
+        V[3] = (vulkan_vertex){V2(Min.X, Max.Y), V2(TexMin.U, TexMax.V), Color, TextureIndex};
 
         I[0] = VertexCount + 0;
         I[1] = VertexCount + 1;
@@ -415,11 +438,6 @@ static b32 VulkanRender(void)
         VertexCount += 4;
         IndexCount  += 6;
     }
-
-    vulkan_push_constants PushConstants =
-    {
-        .Projection = Batch.Projection,
-    };
 
     u32 ImageIndex = 0;
 
@@ -521,6 +539,18 @@ static b32 VulkanRender(void)
 
     vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vulkan.Pipeline);
 
+    VkDescriptorImageInfo ImageInfos[GameTexture_COUNT] = {0};
+
+    for (u32 TextureIndex = 0; TextureIndex < ArrayCount(Vulkan.Textures); TextureIndex++)
+    {
+        VkDescriptorImageInfo* ImageInfo = ImageInfos + TextureIndex;
+        vulkan_texture* Texture = Vulkan.Textures + TextureIndex;
+
+        ImageInfo->sampler = Texture->Sampler;
+        ImageInfo->imageView = Texture->ImageView;
+        ImageInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
     VkWriteDescriptorSet DescriptorWrites[] =
     {
         {
@@ -542,14 +572,9 @@ static b32 VulkanRender(void)
             .dstSet = 0,
             .dstBinding = 1,
             .dstArrayElement = 0,
-            .descriptorCount = 1,
+            .descriptorCount = GameTexture_COUNT,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &(VkDescriptorImageInfo)
-            {
-                .sampler = Vulkan.WhiteTexture.Sampler,
-                .imageView = Vulkan.WhiteTexture.ImageView,
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            },
+            .pImageInfo = ImageInfos,
         },
     };
 
@@ -560,15 +585,6 @@ static b32 VulkanRender(void)
         0,
         ArrayCount(DescriptorWrites),
         DescriptorWrites
-    );
-
-    vkCmdPushConstants(
-        CommandBuffer,
-        Vulkan.PipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(PushConstants),
-        &PushConstants
     );
 
     vkCmdBindIndexBuffer(CommandBuffer, Vulkan.IndexBuffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -960,7 +976,7 @@ static b32 VulkanCreateSetLayout(void)
         {
             .binding = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
+            .descriptorCount = GameTexture_COUNT,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     };
@@ -989,13 +1005,6 @@ static b32 VulkanCreatePipelineLayout(void)
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &Vulkan.SetLayout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &(VkPushConstantRange)
-        {
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset = 0,
-            .size = sizeof(vulkan_push_constants),
-        },
     };
 
     if (vkCreatePipelineLayout(Vulkan.Device, &PipelineLayoutInfo, 0, &Vulkan.PipelineLayout))
@@ -1060,7 +1069,7 @@ static b32 VulkanCreatePipeline(void)
         {
             .binding = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
+            .descriptorCount = GameTexture_COUNT,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     };
@@ -1078,6 +1087,18 @@ static b32 VulkanCreatePipeline(void)
             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module = FragmentModule,
             .pName = "main",
+            .pSpecializationInfo = &(VkSpecializationInfo)
+            {
+                .mapEntryCount = 1,
+                .pMapEntries = &(VkSpecializationMapEntry)
+                {
+                    .constantID = 0, // NOTE(vak): TextureCount
+                    .offset     = 0,
+                    .size       = 4, // NOTE(vak): sizeof(int)
+                },
+                .dataSize = 4,
+                .pData = (int[]){GameTexture_COUNT},
+            },
         },
     };
 
@@ -1113,8 +1134,6 @@ static b32 VulkanCreatePipeline(void)
     {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f,
     };
 
@@ -1400,23 +1419,34 @@ static void VulkanDestroyBuffer(vulkan_buffer* Buffer)
 static b32 VulkanCreateTexture(
     vulkan_texture*         Texture,
     VkSampler               Sampler,
+    vulkan_pixel_kind       PixelKind,
     u32                     Width,
-    u32                     Height,
-    VkFormat                Format
+    u32                     Height
 )
 {
     memset(Texture, 0, sizeof(vulkan_texture));
 
+    switch (PixelKind)
+    {
+        default:
+        {
+            fprintf(stderr, "unknown pixel kind in VulkanCreateTexture().");
+            return (false);
+        } break;
+
+        case VulkanPixelKind_RGBA:  Texture->Format = VK_FORMAT_R8G8B8A8_UNORM; break;
+        case VulkanPixelKind_Alpha: Texture->Format = VK_FORMAT_R8_UNORM;       break;
+    }
+
     Texture->Width = Width;
     Texture->Height = Height;
-    Texture->Format = Format;
     Texture->Sampler = Sampler;
 
     VkImageCreateInfo ImageInfo =
     {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = Format,
+        .format = Texture->Format,
         .extent = {.width = Width, .height = Height, .depth = 1},
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -1487,6 +1517,14 @@ static b32 VulkanCreateTexture(
         },
     };
 
+    if (PixelKind == VulkanPixelKind_Alpha)
+    {
+        ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_ONE;
+        ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_ONE;
+        ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_ONE;
+        ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_R;
+    }
+
     if (vkCreateImageView(Vulkan.Device, &ImageViewInfo, 0, &Texture->ImageView))
     {
         VulkanError("failed to create image view for texture");
@@ -1506,7 +1544,8 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
             VulkanError("unknown format in VulkanUploadTexture()");
             return (false);
 
-        case VK_FORMAT_R8G8B8A8_UNORM: BytesPerPixel = 4; break;
+        case VK_FORMAT_R8_UNORM:        BytesPerPixel = 1; break;
+        case VK_FORMAT_R8G8B8A8_UNORM:  BytesPerPixel = 4; break;
     }
 
     usize UploadSize = Texture->Width * Texture->Height * BytesPerPixel;

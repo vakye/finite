@@ -31,7 +31,27 @@ s32 main(s32 ArgCount, char* Args[])
         return (1);
     }
 
-    if (!VulkanSetup())
+    static u32 WhiteImageRGBA[2 * 2] =
+    {
+        0xFFFFFFFF, 0xFFFFFFFF,
+        0xFFFFFFFF, 0xFFFFFFFF,
+    };
+
+    static u8 FontImageAlpha[128 * 64 * 1] =
+    {
+        #include "bitmap_font5x9.h"
+    };
+
+    vulkan_texture_load_set TextureLoadSet =
+    {
+        .LoadInfos =
+        {
+            [GameTexture_White]     = {VulkanPixelKind_RGBA,    WhiteImageRGBA, 2,   2 },
+            [GameTexture_Font5x9]   = {VulkanPixelKind_Alpha,   FontImageAlpha, 128, 64},
+        },
+    };
+
+    if (!VulkanSetup(&TextureLoadSet))
     {
         VulkanShutdown();
         return (1);

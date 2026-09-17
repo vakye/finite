@@ -743,5 +743,52 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         RenderRect(R2MinSize(Particle->P, Particle->Size), Color);
     }
+
+    // NOTE(vak): Test text rendering
+
+    {
+        RenderOrthographic2D(R2MinMax(
+            V2(0.0f, (f32)Height),
+            V2((f32)Width, 0.0f)
+        ));
+
+        v4 Colors[4] =
+        {
+            {.E = {1.0f, 1.0f, 1.0f, 1.0f}},
+            {.E = {1.0f, 0.0f, 0.0f, 1.0f}},
+            {.E = {0.0f, 1.0f, 0.0f, 1.0f}},
+            {.E = {0.0f, 0.0f, 1.0f, 1.0f}},
+        };
+
+        v2 Position = V2(0, 0);
+        string Text = Str("The quick brown fox jumps over the lazy dog.");
+
+        for (usize Index = 0; Index < ArrayCount(Colors); Index++)
+        {
+            RenderText(Text, Position, Colors[Index]);
+
+            Position.Y += RenderGetTextSizeY(Text);
+        }
+
+        {
+            char BufferTextFPS[64] = {0};
+            usize CountTextFPS = snprintf(BufferTextFPS, sizeof(BufferTextFPS), "FPS: %f", 1.0f/DeltaTime);
+
+            string TextFPS = StrData(BufferTextFPS, CountTextFPS);
+
+            RenderText(TextFPS, Position, V4(1.0f, 1.0f, 1.0f, 1.0f));
+            Position.Y += RenderGetTextSizeY(TextFPS);
+        }
+
+        {
+            char BufferTextStage[64] = {0};
+            usize CountTextStage = snprintf(BufferTextStage, sizeof(BufferTextStage), "Stage: %u", Game.Stage);
+
+            string TextStage = StrData(BufferTextStage, CountTextStage);
+
+            RenderText(TextStage, Position, V4(1.0f, 1.0f, 1.0f, 1.0f));
+            Position.Y += RenderGetTextSizeY(TextStage);
+        }
+    }
 }
 

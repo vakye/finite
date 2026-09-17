@@ -191,3 +191,15 @@ static m4x4 M4x4Orthographic2D(rect2 ViewRect)
     return (Result);
 }
 
+static v4 M4x4MultiplyV4(m4x4 A, v4 B)
+{
+    v4 Result = V4(
+        (A.E[0] * B.X) + (A.E[4] * B.Y) + (A.E[8]  * B.Z) + (A.E[12] * B.W),
+        (A.E[1] * B.X) + (A.E[5] * B.Y) + (A.E[9]  * B.Z) + (A.E[13] * B.W),
+        (A.E[2] * B.X) + (A.E[6] * B.Y) + (A.E[10] * B.Z) + (A.E[14] * B.W),
+        (A.E[3] * B.X) + (A.E[7] * B.Y) + (A.E[11] * B.Z) + (A.E[15] * B.W)
+    );
+
+    return (Result);
+}
+

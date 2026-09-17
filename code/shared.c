@@ -37,3 +37,12 @@ typedef u32 b32;
 #define true  (1)
 #define false (0)
 
+typedef struct
+{
+    char* Data;
+    usize Size;
+} string;
+
+#define Str(Literal)        (string){Literal, sizeof(Literal) - 1}
+#define StrData(Data, Size) (string){Data, Size}
+

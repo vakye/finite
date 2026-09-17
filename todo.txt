@@ -69,7 +69,7 @@
 
 [Text rendering]
 
-    [ ] - Simple font atlas
+    [x] - Simple font atlas
 
 ====================================================================================================================
 
@@ -99,8 +99,8 @@
     [x] - Open a Wayland window
     [x] - Render colored rectangles with Vulkan
     [+] - Vulkan textures + render textured rectangles
-    [ ] - Load raw pixel image into a texture
-    [ ] - Draw text using a simple font atlas
+    [x] - Load raw pixel image into a texture
+    [x] - Draw text using a simple font atlas
 
 [Input Backend]
 
