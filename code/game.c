@@ -534,6 +534,23 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
             Enemy->Alive = (Enemy->CurrentHealth > 0.0f);
             Bullet->Alive = false;
 
+            if (Enemy->Alive == false)
+            {
+                usize DeathParticleCount = 16;
+
+                for (usize Index = 0; Index < DeathParticleCount; Index++)
+                {
+                    float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
+                    v2      ParticleP          = Enemy->P;
+                    v2      ParticleDP         = V2(3.0f*RandomBilateral(&Game.Entropy), 3.0f*RandomBilateral(&Game.Entropy));
+                    v2      ParticleDDP        = ParticleDP;
+                    v2      ParticleSize       = V2Scalar(0.4f + 0.1f*RandomUnilateral(&Game.Entropy));
+                    v4      ParticleColor      = V4(1.0f, 1.0f, 1.0f, 1.0f);
+
+                    GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
+                }
+            }
+
             v2 KnockbackDirection = V2NormalizeOrZero(V2Add(Bullet->DP, V2Sub(Enemy->P, Bullet->P)));
             f32 KnockbackStrength = 5.0f;
 
@@ -592,6 +609,23 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
             Player->CurrentHealth -= Maximum(0, Enemy->CurrentHealth);
             Enemy->CurrentHealth  -= PlayerHealth;
             Enemy->Alive           = (Enemy->CurrentHealth >= 0.0f);
+
+            if (Enemy->Alive == false)
+            {
+                usize DeathParticleCount = 16;
+
+                for (usize Index = 0; Index < DeathParticleCount; Index++)
+                {
+                    float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
+                    v2      ParticleP          = Enemy->P;
+                    v2      ParticleDP         = V2(3.0f*RandomBilateral(&Game.Entropy), 3.0f*RandomBilateral(&Game.Entropy));
+                    v2      ParticleDDP        = ParticleDP;
+                    v2      ParticleSize       = V2Scalar(0.4f + 0.1f*RandomUnilateral(&Game.Entropy));
+                    v4      ParticleColor      = V4(1.0f, 1.0f, 1.0f, 1.0f);
+
+                    GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
+                }
+            }
         }
 
         static enemy_think* ThinkFor[EnemyKind_COUNT] =
