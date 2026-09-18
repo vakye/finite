@@ -8,32 +8,347 @@ static void GameUpdateAndRender (f32 DeltaTime, u32 Width, u32 Height);
 
 // NOTE(vak): Implementation
 
+#if 1
+
 typedef struct
 {
-    v2      P;
-    v2      DP;
-    v2      Size;
+    u32             Stage;      // NOTE(vak): Current stage
+    random_state    Entropy;    // NOTE(vak): Random number generator state
+    entity_id       PlayerID;   // NOTE(vak): Entity ID of the player
+    u32             EnemyCount; // NOTE(vak): Remaining enemies still alive
+    f32             DeltaTime;  // NOTE(vak): This frame's delta time
+} game_state;
+
+static game_state Game = {0};
+
+static weapon GameWeaponRandomCooldown(weapon_kind Kind)
+{
+    weapon_stats* Stats = GetWeaponStats(Kind);
+
+    f32 MaxCooldown = (Stats->FireRate > 0.0f) ? (1.0f / Stats->FireRate) : (0.0f);
+
+    weapon Result = {.Kind = Kind, .Cooldown = MaxCooldown * RandomUnilateral(&Game.Entropy)};
+    return (Result);
+}
+
+static v2 GameRandomEnemySpawnP(void)
+{
+    v2 Result = V2(
+        0.0f  + 7.0f * RandomBilateral(&Game.Entropy),
+        16.0f + 2.0f * RandomBilateral(&Game.Entropy)
+    );
+
+    return (Result);
+}
+
+static v2 GameRandomEnemyRestP(void)
+{
+    v2 Result = V2(
+        0.0f  + 7.0f * RandomBilateral (&Game.Entropy),
+        4.0f  + 4.0f * RandomUnilateral(&Game.Entropy)
+    );
+
+    return (Result);
+}
+
+static void GameSpawnEnemyGrunt(void)
+{
+    entity_id       EntityID    = AddEntity(EntityKind_EnemyGrunt);
+    entity*         Entity      = GetEntity(EntityID);
+    body*           Body        = GetBody(Entity->BodyID);
+    enemy_grunt*    Grunt       = &Entity->Grunt;
+
+    // NOTE(vak): Grunt
+    //      + Health:       Medium
+    //      + Speed:        None
+    //      + Fire rate:    Medium
+    //      + Damage:       Medium
+
+    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
+
+    Entity->Color           = V4(0.3f, 0.4f, 0.9f, 1.0f);
+    Grunt->MaxHealth        = 120.0f;
+    Grunt->Weapon           = GameWeaponRandomCooldown(WeaponKind_GruntPistol);
+
+    Body->Size              = V2(0.6f, 0.4f);
+    Grunt->CurrentHealth    = Grunt->MaxHealth;
+    Grunt->RestP            = GameRandomEnemyRestP();
+}
+
+static void GameSpawnEnemyMover(void)
+{
+    entity_id       EntityID    = AddEntity(EntityKind_EnemyMover);
+    entity*         Entity      = GetEntity(EntityID);
+    body*           Body        = GetBody(Entity->BodyID);
+    enemy_mover*    Mover       = &Entity->Mover;
+
+    // NOTE(vak): Mover
+    //      + Health:       Low
+    //      + Speed:        High
+    //      + Fire rate:    High
+    //      + Damage:       Low
+
+    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
+
+    Entity->Color           = V4(0.9f, 0.9f, 0.4f, 1.0f);
+    Mover->ShuffleCooldown  = 0.5f;
+    Mover->Weapon           = GameWeaponRandomCooldown(WeaponKind_MoverPistol);
+
+    Body->Size              = V2(0.4f, 0.4f);
+    Mover->CurrentHealth    = Mover->MaxHealth;
+    Mover->ShuffleTimer     = Mover->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
+    Mover->RestP            = GameRandomEnemyRestP();
+}
+
+static void GameSpawnEnemyArmored(void)
+{
+    entity_id       EntityID    = AddEntity(EntityKind_EnemyArmored);
+    entity*         Entity      = GetEntity(EntityID);
+    body*           Body        = GetBody(Entity->BodyID);
+    enemy_armored*  Armored     = &Entity->Armored;
+
+    // NOTE(vak): Armored
+    //      + Health:       High
+    //      + Speed:        Low
+    //      + Fire rate:    Low
+    //      + Damage:       High
+
+    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
+
+    Entity->Color               = V4(0.5f, 0.5f, 0.5f, 1.0f);
+    Armored->ShuffleCooldown    = 5.3f;
+    Armored->MaxHealth          = 300.0f;
+    Armored->Weapon             = GameWeaponRandomCooldown(WeaponKind_ArmoredRevolver);
+
+    Body->Size                  = V2(0.8f, 0.8f);
+    Armored->CurrentHealth      = Armored->MaxHealth;
+    Armored->ShuffleTimer       = Armored->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
+    Armored->RestP              = GameRandomEnemyRestP();
+}
+
+static entity_id GameSpawnPlayer(void)
+{
+    entity_id       EntityID    = AddEntity(EntityKind_Player);
+    entity*         Entity      = GetEntity(EntityID);
+    body*           Body        = GetBody(Entity->BodyID);
+    player*         Player      = &Entity->Player;
+
+    SetBodyP(Entity->BodyID, V2(0.0f, -6.5f));
+
+    Entity->Color           = V4(1.0f, 0.8f, 0.5f, 1.0f);
+    Body->Size              = V2(0.5f, 0.5f);
+    Player->MaxHealth       = 200.0f;
+    Player->CurrentHealth   = Player->MaxHealth;
+
+    return (EntityID);
+}
+
+static void GameStartNewStage(void)
+{
+    Game.Stage++;
+
+    u32 MaxGruntCount   = 20;
+    u32 MaxMoverCount   = 10;
+    u32 MaxArmoredCount = 5;
+
+    u32 GruntCount      = 10 + (Game.Stage - 1);
+    u32 MoverCount      = 0;
+    u32 ArmoredCount    = 0;
+
+    if (Game.Stage >= 2)
+        MoverCount = 1 + (Game.Stage - 2);
+
+    if (Game.Stage >= 3)
+        ArmoredCount = 1 + (Game.Stage - 3);
+
+    GruntCount      = Minimum(GruntCount,   MaxGruntCount);
+    MoverCount      = Minimum(MoverCount,   MaxMoverCount);
+    ArmoredCount    = Minimum(ArmoredCount, MaxArmoredCount);
+
+    for (u32 Index = 0; Index < GruntCount; Index++)
+        GameSpawnEnemyGrunt();
+
+    for (u32 Index = 0; Index < MoverCount; Index++)
+        GameSpawnEnemyMover();
+
+    for (u32 Index = 0; Index < ArmoredCount; Index++)
+        GameSpawnEnemyArmored();
+
+    Game.EnemyCount = GruntCount + MoverCount + ArmoredCount;
+}
+
+static void GameRestart(void)
+{
+    RemoveAllEntities();
+    memset(&Game, 0, sizeof(game_state));
+
+    Game.PlayerID = GameSpawnPlayer();
+    Game.Stage = 5;
+    GameStartNewStage();
+}
+
+static void GamePlayerUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    player* Player = &Entity->Player;
+
+    v2  MoveDirection = V2(0.0f, 0.0f);
+
+    if (InputIsButtonDown(InputButton_MoveLeft))    MoveDirection.X -= 1.0f;
+    if (InputIsButtonDown(InputButton_MoveRight))   MoveDirection.X += 1.0f;
+    if (InputIsButtonDown(InputButton_MoveDown))    MoveDirection.Y -= 1.0f;
+    if (InputIsButtonDown(InputButton_MoveUp))      MoveDirection.Y += 1.0f;
+
+    MoveDirection = V2NormalizeOrZero(MoveDirection);
+
+    f32 MoveFriction    = 25.0f;
+    f32 MoveForce       = 180.0f;
+
+    v2 Force = V2Sub(
+        V2ScalarMul(MoveForce,      MoveDirection),
+        V2ScalarMul(MoveFriction,   Body->DP)
+    );
+
+    SetForce(Entity->BodyID, Force);
+}
+
+static v2 GameComputeEnemyMoveForce(v2 RestP, v2 CurrentP, v2 CurrentDP)
+{
+    // NOTE(vak): Proportional derivative controller to move the enemy
+    // from 'CurrentP' to 'RestP' in a smooth manner.
+
+    // NOTE(vak): Basically a mass-spring damper model
+
+    v2 MoveDirection = V2NormalizeOrZero(V2Sub(RestP, CurrentP));
+    f32 MoveFriction = 4.0f;
+    f32 MoveForce = 20.0f;
+
+    v2 JitterDirection = V2NormalizeOrZero(V2(
+        RandomBilateral(&Game.Entropy),
+        RandomBilateral(&Game.Entropy)
+    ));
+
+    f32 JitterStrength = 20.0f;
+
+    v2 Force = V2Zero();
+
+    Force = V2Add(Force, V2Sub(
+        V2ScalarMul(MoveForce, MoveDirection),
+        V2ScalarMul(MoveFriction, CurrentDP)
+    ));
+
+    Force = V2Add(Force, V2ScalarMul(JitterStrength, JitterDirection));
+
+    return (Force);
+}
+
+static void GameEnemyGruntUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    enemy_grunt* Grunt = &Entity->Grunt;
+
+    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Grunt->RestP, Body->P, Body->DP));
+}
+
+static void GameEnemyMoverUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    enemy_mover* Mover = &Entity->Mover;
+
+    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Mover->RestP, Body->P, Body->DP));
+
+    Mover->ShuffleTimer -= Game.DeltaTime;
+    if (Mover->ShuffleTimer <= 0.0f)
+    {
+        entity* PlayerEntity = GetEntity(Game.PlayerID);
+        body* PlayerBody = GetBody(PlayerEntity->BodyID);
+
+        Mover->RestP = V2(
+            PlayerBody->P.X + 5.0f * RandomBilateral (&Game.Entropy),
+            4.0f            + 4.0f * RandomUnilateral(&Game.Entropy)
+        );
+
+        Mover->ShuffleTimer = Mover->ShuffleCooldown;
+    }
+}
+
+static void GameEnemyArmoredUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    enemy_armored* Armored = &Entity->Armored;
+
+    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Armored->RestP, Body->P, Body->DP));
+
+    Armored->ShuffleTimer -= Game.DeltaTime;
+    if (Armored->ShuffleTimer <= 0.0f)
+    {
+        Armored->RestP = V2(
+            0.0f + 8.0f * RandomBilateral (&Game.Entropy),
+            4.0f + 4.0f * RandomUnilateral(&Game.Entropy)
+        );
+
+        Armored->ShuffleTimer = Armored->ShuffleCooldown;
+    }
+}
+
+static void GameSetup(usize RandomSeed)
+{
+    Game.Entropy.State = RandomSeed;
+
+    EquipEntityKindUpdate(EntityKind_Player,        GamePlayerUpdate);
+    EquipEntityKindUpdate(EntityKind_EnemyGrunt,    GameEnemyGruntUpdate);
+    EquipEntityKindUpdate(EntityKind_EnemyMover,    GameEnemyMoverUpdate);
+    EquipEntityKindUpdate(EntityKind_EnemyArmored,  GameEnemyArmoredUpdate);
+
+    GameRestart();
+}
+
+static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
+{
+    Game.DeltaTime = DeltaTime;
+
+    f32 AspectRatio = (f32)Width / (f32)Height;
+    f32 FocalLength = 0.05f;
+
+    v2 ViewCenter = V2(0.0f, 0.0f);
+    v2 ViewSize   = V2(
+        AspectRatio / FocalLength,
+        1.0f        / FocalLength
+    );
+
+    rect2 ViewRect = R2CenterSize(ViewCenter, ViewSize);
+
+    RenderOrthographic2D(ViewRect);
+
+    UpdateAllEntities();
+    IntegrateAllForces(DeltaTime);
+    RenderAllEntities();
+}
+
+#else
+
+#define CollisionMaskFlag_Player        (1ull << 0)
+#define CollisionMaskFlag_Enemy         (1ull << 1)
+#define CollisionMaskFlag_All       (U64Max)
+
+typedef struct
+{
+    body_id BodyID;
+    v4      Color;
     float   ShootTimer;
     float   CurrentHealth;
     float   MaxHealth;
 } player;
 
-typedef enum
-{
-    BulletHitFlag_None      = (0),
-    BulletHitFlag_Player    = (1 << 0),
-    BulletHitFlag_Enemy     = (1 << 1),
-} bullet_hit_flags;
-
 typedef struct
 {
     b32                 Alive;
     f32                 Damage;
-    bullet_hit_flags    HitFlags;
-    v2                  P;
-    v2                  DP;
-    v2                  DDP;
-    v2                  Size;
+    body_id             BodyID;
     v4                  Color;
 } bullet;
 
@@ -54,9 +369,8 @@ struct enemy
     enemy_kind  Kind;
     b32         Alive;
     v2          RestP;
-    v2          P;
-    v2          DP;
-    v2          Size;
+    body_id     BodyID;
+    v4          Color;
     f32         CurrentHealth;
     f32         ShootTimer;
     f32         MaxHealth;
@@ -70,14 +384,30 @@ struct enemy
 
 typedef struct
 {
-    f32 Lifetime;
-    f32 Remaining;
-    v2  P;
-    v2  DP;
-    v2  DDP;
-    v2  Size;
-    v4  Color;
+    f32         Lifetime;
+    f32         Remaining;
+    body_id     BodyID;
+    v4          Color;
 } particle;
+
+typedef enum
+{
+    EntityKind_Player   = 0,
+    EntityKind_Enemy,
+    EntityKind_Bullet,
+    EntityKind_COUNT,
+} entity_kind;
+
+typedef struct
+{
+    entity_kind Kind;
+    union
+    {
+        player* Player;
+        enemy*  Enemy;
+        bullet* Bullet;
+    };
+} entity;
 
 typedef struct
 {
@@ -86,12 +416,13 @@ typedef struct
     player          Player;
     bullet          Bullets[256];
     enemy           Enemies[256];
+    entity          Entities[1024];
     particle        Particles[1024];
 } game_state;
 
 static game_state Game = {0};
 
-static void GameSpawnBullet(f32 Damage, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color, bullet_hit_flags HitFlags)
+static void GameSpawnBullet(f32 Damage, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color, u64 CollisionMask)
 {
     bullet* Bullet = 0;
 
@@ -108,14 +439,17 @@ static void GameSpawnBullet(f32 Damage, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color, 
     if (Bullet)
     {
         Bullet->Alive       = true;
-        Bullet->Damage      = Damage;
-        Bullet->HitFlags    = HitFlags;
-        Bullet->P           = P;
-        Bullet->DP          = DP;
-        Bullet->DDP         = DDP;
-        Bullet->Size        = Size;
+        Bullet->BodyID      = AddBody(P, DP, DDP, Size, 1.0f);
         Bullet->Color       = Color;
+
+        EquipBodyCollisionMask(Bullet->BodyID, CollisionMask);
     }
+}
+
+static void GameKillBullet(bullet* Bullet)
+{
+    Bullet->Alive = false;
+    RemoveBody(Bullet->BodyID);
 }
 
 static void GameSpawnEnemy(enemy_kind Kind, v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 ShootCooldown)
@@ -139,13 +473,13 @@ static void GameSpawnEnemy(enemy_kind Kind, v2 RestP, v2 P, v2 DP, v2 Size, f32 
         Enemy->Kind             = Kind;
         Enemy->Alive            = true;
         Enemy->RestP            = RestP;
-        Enemy->P                = P;
-        Enemy->DP               = DP;
-        Enemy->Size             = Size;
+        Enemy->BodyID           = AddBody(P, DP, V2Zero(), Size, 1.0f);
         Enemy->CurrentHealth    = MaxHealth;
         Enemy->ShootTimer       = ShootCooldown * RandomUnilateral(&Game.Entropy);
         Enemy->MaxHealth        = MaxHealth;
         Enemy->ShootCooldown    = ShootCooldown;
+
+        EquipBodyCollisionMask(Enemy->BodyID, CollisionMaskFlag_Enemy);
     }
 }
 
@@ -156,10 +490,11 @@ static void GameEnemyMoverThink(enemy* Enemy, f32 DeltaTime)
     if (Enemy->Mover.ShuffleTimer <= 0.0f)
     {
         player* Player = &Game.Player;
+        body* PlayerBody = GetBody(Player->BodyID);
 
         Enemy->RestP = V2(
-            Player->P.X + 1.0f * RandomBilateral(&Game.Entropy),
-            6.0f        + 2.0f * RandomBilateral(&Game.Entropy)
+            PlayerBody->P.X + 1.0f * RandomBilateral(&Game.Entropy),
+            6.0f            + 2.0f * RandomBilateral(&Game.Entropy)
         );
 
         Enemy->Mover.ShuffleTimer = 1.2f;
@@ -184,10 +519,7 @@ static void GameSpawnParticle(f32 Lifetime, v2 P, v2 DP, v2 DDP, v2 Size, v4 Col
     {
         Particle->Lifetime  = Lifetime;
         Particle->Remaining = Lifetime;
-        Particle->P         = P;
-        Particle->DP        = DP;
-        Particle->DDP       = DDP;
-        Particle->Size      = Size;
+        Particle->BodyID    = AddBody(P, DP, DDP, Size, 1.0f);
         Particle->Color     = Color;
     }
 }
@@ -199,11 +531,12 @@ static void GamePlayerTryShoot(void)
     if (Player->ShootTimer > 0.0f)
         return;
 
-    bullet_hit_flags HitFlags = BulletHitFlag_Enemy;
+    body* PlayerBody = GetBody(Player->BodyID);
+
     v2  BulletSize = V2(0.1f, 0.2f);
     f32 Damage = 20.0f;
-    v2  SpawnP = V2(Player->P.X, Player->P.Y + Player->Size.Y + 0.5f*BulletSize.Y);
-    v2  SpawnDP = V2(0.0f, Maximum(0.0f, Player->DP.Y) + 8.0f);
+    v2  SpawnP = V2(PlayerBody->P.X, PlayerBody->P.Y + PlayerBody->Size.Y + 0.5f*BulletSize.Y);
+    v2  SpawnDP = V2(0.0f, Maximum(0.0f, PlayerBody->DP.Y) + 8.0f);
     v2  SpawnDDP = V2(0.0f, 20.0f);
     v4  BulletColor = V4(0.5f, 0.8f, 1.0f, 1.0f);
 
@@ -214,9 +547,9 @@ static void GamePlayerTryShoot(void)
         V2(+1.5f, 0.0f),
     };
 
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[0]), SpawnDDP, BulletSize, BulletColor, HitFlags);
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[1]), SpawnDDP, BulletSize, BulletColor, HitFlags);
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[2]), SpawnDDP, BulletSize, BulletColor, HitFlags);
+    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[0]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
+    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[1]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
+    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[2]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
 
     Player->ShootTimer = 0.1f;
 
@@ -253,15 +586,16 @@ static void GameEnemyTryShoot(enemy* Enemy)
     if (Enemy->ShootTimer > 0.0f)
         return;
 
-    bullet_hit_flags HitFlags = BulletHitFlag_Player;
+    body* EnemyBody = GetBody(Enemy->BodyID);
+
     v2  BulletSize = V2(0.1f, 0.1f);
     f32 Damage = 20.0f;
-    v2  SpawnP = V2(Enemy->P.X, Enemy->P.Y - Enemy->Size.Y - 0.5f*BulletSize.Y);
+    v2  SpawnP = V2(EnemyBody->P.X, EnemyBody->P.Y - EnemyBody->Size.Y - 0.5f*BulletSize.Y);
     v2  SpawnDP = V2(0.0f, -5.0f);
     v2  SpawnDDP = V2(0.0f, -10.0f);
     v4  BulletColor = V4(1.0f, 0.4f, 0.2f, 1.0f);
 
-    GameSpawnBullet(Damage, SpawnP, SpawnDP, SpawnDDP, BulletSize, BulletColor, HitFlags);
+    GameSpawnBullet(Damage, SpawnP, SpawnDP, SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Player);
 
     usize SmokeParticleCount    = 8;
     usize FireParticleCount     = 4;
@@ -291,58 +625,6 @@ static void GameEnemyTryShoot(enemy* Enemy)
     }
 
     Enemy->ShootTimer = Enemy->ShootCooldown;
-}
-
-static b32 GameIsPlayerHitByBullet(bullet* Bullet)
-{
-    if ((Bullet->HitFlags & BulletHitFlag_Player) == 0)
-        return (false);
-
-    player* Player = &Game.Player;
-
-    rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
-    rect2 PlayerRect = R2CenterSize(Player->P, Player->Size);
-
-    b32 Result = R2Intersects(PlayerRect, BulletRect);
-    return (Result);
-}
-
-static enemy* GameGetEnemyHitByBullet(bullet* Bullet)
-{
-    if ((Bullet->HitFlags & BulletHitFlag_Enemy) == 0)
-        return (0);
-
-    enemy* HitEnemy = 0;
-
-    for (usize Index = 0; Index < ArrayCount(Game.Enemies); Index++)
-    {
-        enemy* Enemy = Game.Enemies + Index;
-
-        if (!Enemy->Alive)
-            continue;
-
-        rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
-        rect2 EnemyRect  = R2CenterSize(Enemy->P,  Enemy->Size);
-
-        if (R2Intersects(EnemyRect, BulletRect))
-        {
-            HitEnemy = Enemy;
-            break;
-        }
-    }
-
-    return (HitEnemy);
-}
-
-static b32 GameIsPlayerHittingEnemy(enemy* Enemy)
-{
-    player* Player = &Game.Player;
-
-    rect2 EnemyRect  = R2CenterSize(Enemy->P,  Enemy->Size);
-    rect2 PlayerRect = R2CenterSize(Player->P, Player->Size);
-
-    b32 Result = R2Intersects(PlayerRect, EnemyRect);
-    return (Result);
 }
 
 static b32 GameAreAllEnemiesDead(void)
@@ -444,8 +726,10 @@ static void GameRestart(void)
 
     player* Player = &Game.Player;
 
-    Player->P = V2(0.0f, -6.5f);
-    Player->Size = V2(0.6f, 0.3f);
+    v2 InitialP = V2(0.0f, -6.5f);
+    v2 Size = V2(0.6f, 0.3f);
+
+    Player->BodyID = AddBody(InitialP, V2Zero(), V2Zero(), Size, 1.0f);
     Player->MaxHealth = 120.0f;
     Player->CurrentHealth = Player->MaxHealth;
 
@@ -825,4 +1109,6 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         }
     }
 }
+
+#endif
 
