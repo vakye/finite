@@ -31,6 +31,8 @@ typedef u32 b32;
 
 #define Absolute(Value) ((Value) < 0 ? -(Value) : (Value))
 
+#define SafeDivide0(A, B) ((Absolute(B) > 1e-14f) ? ((A) / (B)) : (0))
+
 #define U32Max (~0U)
 #define U64Max (~0ULL)
 

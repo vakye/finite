@@ -26,6 +26,7 @@ CompileFlags=" \
     -Wno-unused-variable \
     -Wno-unused-function \
     -Wno-unused-but-set-variable \
+    -Wno-switch \
     -o $OutputFile"
 
 LinkFlags=" \

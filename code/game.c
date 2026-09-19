@@ -10,10 +10,15 @@ static void GameUpdateAndRender (f32 DeltaTime, u32 Width, u32 Height);
 
 #if 1
 
+#define CollisionMaskFlag_Player        (1ull << 0)
+#define CollisionMaskFlag_Enemy         (1ull << 1)
+#define CollisionMaskFlag_All           (U64Max)
+
 typedef struct
 {
     u32             Stage;      // NOTE(vak): Current stage
     random_state    Entropy;    // NOTE(vak): Random number generator state
+    rect2           ViewRect;   // NOTE(vak): Camera view rectangle
     entity_id       PlayerID;   // NOTE(vak): Entity ID of the player
     u32             EnemyCount; // NOTE(vak): Remaining enemies still alive
     f32             DeltaTime;  // NOTE(vak): This frame's delta time
@@ -25,7 +30,7 @@ static weapon GameWeaponRandomCooldown(weapon_kind Kind)
 {
     weapon_stats* Stats = GetWeaponStats(Kind);
 
-    f32 MaxCooldown = (Stats->FireRate > 0.0f) ? (1.0f / Stats->FireRate) : (0.0f);
+    f32 MaxCooldown = SafeDivide0(1.0f, Stats->FireRate);
 
     weapon Result = {.Kind = Kind, .Cooldown = MaxCooldown * RandomUnilateral(&Game.Entropy)};
     return (Result);
@@ -71,6 +76,7 @@ static void GameSpawnEnemyGrunt(void)
     Grunt->Weapon           = GameWeaponRandomCooldown(WeaponKind_GruntPistol);
 
     Body->Size              = V2(0.6f, 0.4f);
+    Body->CollisionMask     = CollisionMaskFlag_Enemy;
     Grunt->CurrentHealth    = Grunt->MaxHealth;
     Grunt->RestP            = GameRandomEnemyRestP();
 }
@@ -95,6 +101,7 @@ static void GameSpawnEnemyMover(void)
     Mover->Weapon           = GameWeaponRandomCooldown(WeaponKind_MoverPistol);
 
     Body->Size              = V2(0.4f, 0.4f);
+    Body->CollisionMask     = CollisionMaskFlag_Enemy;
     Mover->CurrentHealth    = Mover->MaxHealth;
     Mover->ShuffleTimer     = Mover->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
     Mover->RestP            = GameRandomEnemyRestP();
@@ -121,6 +128,7 @@ static void GameSpawnEnemyArmored(void)
     Armored->Weapon             = GameWeaponRandomCooldown(WeaponKind_ArmoredRevolver);
 
     Body->Size                  = V2(0.8f, 0.8f);
+    Body->CollisionMask     = CollisionMaskFlag_Enemy;
     Armored->CurrentHealth      = Armored->MaxHealth;
     Armored->ShuffleTimer       = Armored->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
     Armored->RestP              = GameRandomEnemyRestP();
@@ -136,9 +144,11 @@ static entity_id GameSpawnPlayer(void)
     SetBodyP(Entity->BodyID, V2(0.0f, -6.5f));
 
     Entity->Color           = V4(1.0f, 0.8f, 0.5f, 1.0f);
-    Body->Size              = V2(0.5f, 0.5f);
+    Body->Size              = V2(0.45f, 0.45f);
+    Body->CollisionMask     = CollisionMaskFlag_Player;
     Player->MaxHealth       = 200.0f;
     Player->CurrentHealth   = Player->MaxHealth;
+    Player->Weapon          = (weapon){.Kind = WeaponKind_PlayerPewPew};
 
     return (EntityID);
 }
@@ -183,8 +193,98 @@ static void GameRestart(void)
     memset(&Game, 0, sizeof(game_state));
 
     Game.PlayerID = GameSpawnPlayer();
-    Game.Stage = 5;
     GameStartNewStage();
+}
+
+static void GameUpdateWeapon(weapon* Weapon)
+{
+    Weapon->Cooldown -= Game.DeltaTime;
+    Weapon->Cooldown = Maximum(0.0f, Weapon->Cooldown);
+}
+
+static void GameWeaponTryShoot(weapon* Weapon, v2 P, v2 Direction, u64 CollisionMask)
+{
+    if (Weapon->Cooldown > 0.0f)
+        return;
+
+    weapon_stats* Stats = GetWeaponStats(Weapon->Kind);
+
+    entity_id BulletID = AddEntity(EntityKind_Bullet);
+    entity* BulletEntity = GetEntity(BulletID);
+    body* BulletBody = GetBody(BulletEntity->BodyID);
+    bullet* Bullet = &BulletEntity->Bullet;
+
+    BulletEntity->Color = Stats->BulletColor;
+    BulletBody->P = P;
+    BulletBody->DP = V2MulScalar(Direction, Stats->BulletSpeed);
+    BulletBody->DDP = V2MulScalar(Direction, Stats->BulletAccel);
+    BulletBody->Size = Stats->BulletSize;
+    BulletBody->CollisionMask = CollisionMask;
+    Bullet->Damage = Stats->BulletDamage;
+
+    u32 FireParticleCount = 4;
+    for (usize Index = 0; Index < FireParticleCount; Index++)
+    {
+        entity_id ParticleID = AddEntity(EntityKind_Particle);
+        entity* ParticleEntity = GetEntity(ParticleID);
+        body* ParticleBody = GetBody(ParticleEntity->BodyID);
+        particle* Particle = &ParticleEntity->Particle;
+
+        v2 Jitter = V2(
+            0.5f * RandomBilateral(&Game.Entropy),
+            0.5f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 ParticleDirection = V2NormalizeOrZero(V2Add(Jitter, Direction));
+
+        ParticleBody->P = BulletBody->P;
+        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->DDP = V2MulScalar(ParticleDirection, 3.0f + 3.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->Size = V2(0.05f + 0.1f*RandomUnilateral(&Game.Entropy), 0.05f + 0.1f*RandomUnilateral(&Game.Entropy));
+
+        Particle->BaseColor = V4(1.0f, 0.9f, 0.6f, 0.9f);
+        Particle->Lifetime = 0.1f + 0.2f*RandomUnilateral(&Game.Entropy);
+        Particle->TimeRemaining = Particle->Lifetime;
+    }
+
+    u32 SmokeParticleCount = 8;
+    for (usize Index = 0; Index < SmokeParticleCount; Index++)
+    {
+        entity_id ParticleID = AddEntity(EntityKind_Particle);
+        entity* ParticleEntity = GetEntity(ParticleID);
+        body* ParticleBody = GetBody(ParticleEntity->BodyID);
+        particle* Particle = &ParticleEntity->Particle;
+
+        v2 Jitter = V2(
+            0.5f * RandomBilateral(&Game.Entropy),
+            0.5f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 ParticleDirection = V2NormalizeOrZero(V2Add(Jitter, Direction));
+
+        ParticleBody->P = BulletBody->P;
+        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->DDP = V2MulScalar(ParticleDirection, 4.0f + 3.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->Size = V2(0.1f + 0.05f*RandomUnilateral(&Game.Entropy), 0.1f + 0.05f*RandomUnilateral(&Game.Entropy));
+
+        Particle->BaseColor = V4(0.4f, 0.4f, 0.4f, 0.7f);
+        Particle->Lifetime = 0.2f + 0.2f*RandomUnilateral(&Game.Entropy);
+        Particle->TimeRemaining = Particle->Lifetime;
+    }
+
+    Weapon->Cooldown = SafeDivide0(1.0f, Stats->FireRate);
+}
+
+static void GamePlayerTryShoot(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    player* Player = &Entity->Player;
+
+    v2 Direction = V2(0, 1);
+    v2 BulletP = V2Add(Body->P, V2(0.0f, Body->Size.Y));
+
+    GameWeaponTryShoot(&Player->Weapon, BulletP, Direction, CollisionMaskFlag_Enemy);
 }
 
 static void GamePlayerUpdate(entity_id EntityID)
@@ -192,6 +292,11 @@ static void GamePlayerUpdate(entity_id EntityID)
     entity* Entity = GetEntity(EntityID);
     body* Body = GetBody(Entity->BodyID);
     player* Player = &Entity->Player;
+
+    GameUpdateWeapon(&Player->Weapon);
+
+    if (InputIsButtonDown(InputButton_Shoot))
+        GamePlayerTryShoot(EntityID);
 
     v2  MoveDirection = V2(0.0f, 0.0f);
 
@@ -202,8 +307,8 @@ static void GamePlayerUpdate(entity_id EntityID)
 
     MoveDirection = V2NormalizeOrZero(MoveDirection);
 
-    f32 MoveFriction    = 25.0f;
-    f32 MoveForce       = 180.0f;
+    f32 MoveFriction    = 35.0f;
+    f32 MoveForce       = 250.0f;
 
     v2 Force = V2Sub(
         V2ScalarMul(MoveForce,      MoveDirection),
@@ -211,6 +316,62 @@ static void GamePlayerUpdate(entity_id EntityID)
     );
 
     SetForce(Entity->BodyID, Force);
+}
+
+static void GameBulletUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+
+    rect2 BulletRect = R2CenterSize(Body->P, Body->Size);
+
+    if (!R2Intersects(Game.ViewRect, BulletRect))
+        RemoveEntity(EntityID);
+
+    u32 TrailParticleCount = 1;
+    for (usize Index = 0; Index < TrailParticleCount; Index++)
+    {
+        entity_id ParticleID = AddEntity(EntityKind_Particle);
+        entity* ParticleEntity = GetEntity(ParticleID);
+        body* ParticleBody = GetBody(ParticleEntity->BodyID);
+        particle* Particle = &ParticleEntity->Particle;
+
+        v2 Jitter = V2(
+            0.2f * RandomBilateral(&Game.Entropy),
+            0.2f * RandomBilateral(&Game.Entropy)
+        );
+
+        v2 ParticleDirection = V2NormalizeOrZero(V2Sub(Jitter, V2NormalizeOrZero(Body->DP)));
+
+        ParticleBody->P = Body->P;
+        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->DDP = V2MulScalar(ParticleDirection, 3.0f + 3.0f*RandomUnilateral(&Game.Entropy));
+        ParticleBody->Size = V2(0.05f + 0.05f*RandomUnilateral(&Game.Entropy), 0.05f + 0.05f*RandomUnilateral(&Game.Entropy));
+
+        Particle->BaseColor = Entity->Color;
+        Particle->Lifetime = 0.02f + 0.02f*RandomUnilateral(&Game.Entropy);
+        Particle->TimeRemaining = Particle->Lifetime;
+    }
+}
+
+static void GameParticleUpdate(entity_id EntityID)
+{
+    entity* Entity = GetEntity(EntityID);
+    body* Body = GetBody(Entity->BodyID);
+    particle* Particle = &Entity->Particle;
+
+    Particle->TimeRemaining -= Game.DeltaTime;
+
+    if (Particle->TimeRemaining <= 0.0f)
+    {
+        RemoveEntity(EntityID);
+        return;
+    }
+
+    f32 T = Particle->TimeRemaining / Particle->Lifetime;
+    v4 ColorScale = V4(1.0f, 1.0f, 1.0f, T);
+
+    Entity->Color = V4Mul(Particle->BaseColor, ColorScale);
 }
 
 static v2 GameComputeEnemyMoveForce(v2 RestP, v2 CurrentP, v2 CurrentDP)
@@ -221,15 +382,15 @@ static v2 GameComputeEnemyMoveForce(v2 RestP, v2 CurrentP, v2 CurrentDP)
     // NOTE(vak): Basically a mass-spring damper model
 
     v2 MoveDirection = V2NormalizeOrZero(V2Sub(RestP, CurrentP));
-    f32 MoveFriction = 4.0f;
-    f32 MoveForce = 20.0f;
+    f32 MoveFriction = 2.0f;
+    f32 MoveForce = 10.0f;
 
     v2 JitterDirection = V2NormalizeOrZero(V2(
         RandomBilateral(&Game.Entropy),
         RandomBilateral(&Game.Entropy)
     ));
 
-    f32 JitterStrength = 20.0f;
+    f32 JitterStrength = 25.0f;
 
     v2 Force = V2Zero();
 
@@ -243,11 +404,22 @@ static v2 GameComputeEnemyMoveForce(v2 RestP, v2 CurrentP, v2 CurrentDP)
     return (Force);
 }
 
+static void GameEnemyTryShoot(weapon* Weapon, body* Body)
+{
+    v2 P = V2Add(Body->P, V2(0, -Body->Size.Y));
+    v2 Direction = V2(0, -1);
+
+    GameWeaponTryShoot(Weapon, P, Direction, CollisionMaskFlag_Player);
+}
+
 static void GameEnemyGruntUpdate(entity_id EntityID)
 {
     entity* Entity = GetEntity(EntityID);
     body* Body = GetBody(Entity->BodyID);
     enemy_grunt* Grunt = &Entity->Grunt;
+
+    GameUpdateWeapon(&Grunt->Weapon);
+    GameEnemyTryShoot(&Grunt->Weapon, Body);
 
     SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Grunt->RestP, Body->P, Body->DP));
 }
@@ -257,6 +429,9 @@ static void GameEnemyMoverUpdate(entity_id EntityID)
     entity* Entity = GetEntity(EntityID);
     body* Body = GetBody(Entity->BodyID);
     enemy_mover* Mover = &Entity->Mover;
+
+    GameUpdateWeapon(&Mover->Weapon);
+    GameEnemyTryShoot(&Mover->Weapon, Body);
 
     SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Mover->RestP, Body->P, Body->DP));
 
@@ -281,6 +456,9 @@ static void GameEnemyArmoredUpdate(entity_id EntityID)
     body* Body = GetBody(Entity->BodyID);
     enemy_armored* Armored = &Entity->Armored;
 
+    GameUpdateWeapon(&Armored->Weapon);
+    GameEnemyTryShoot(&Armored->Weapon, Body);
+
     SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Armored->RestP, Body->P, Body->DP));
 
     Armored->ShuffleTimer -= Game.DeltaTime;
@@ -295,14 +473,61 @@ static void GameEnemyArmoredUpdate(entity_id EntityID)
     }
 }
 
+static void GameHandleCollision(body_id ThisBodyID, body_id OtherBodyID)
+{
+    entity_id ThisEntityID = GetEntityFromBody(ThisBodyID);
+    entity_id OtherEntityID = GetEntityFromBody(OtherBodyID);
+
+    printf("%u, %u\n", ThisEntityID, OtherEntityID);
+
+    entity* ThisEntity = GetEntity(ThisEntityID);
+    entity* OtherEntity = GetEntity(OtherEntityID);
+
+    entity_id PlayerEntityID    = NilEntityID;
+    entity_id EnemyEntityID     = NilEntityID;
+    entity_id BulletEntityID    = NilEntityID;
+
+    switch (ThisEntity->Kind)
+    {
+        case EntityKind_Player:         PlayerEntityID  = ThisEntityID; break;
+        case EntityKind_EnemyGrunt:     EnemyEntityID   = ThisEntityID; break;
+        case EntityKind_EnemyMover:     EnemyEntityID   = ThisEntityID; break;
+        case EntityKind_EnemyArmored:   EnemyEntityID   = ThisEntityID; break;
+        case EntityKind_Bullet:         BulletEntityID  = ThisEntityID; break;
+    }
+
+    switch (OtherEntity->Kind)
+    {
+        case EntityKind_Player:         PlayerEntityID  = OtherEntityID; break;
+        case EntityKind_EnemyGrunt:     EnemyEntityID   = OtherEntityID; break;
+        case EntityKind_EnemyMover:     EnemyEntityID   = OtherEntityID; break;
+        case EntityKind_EnemyArmored:   EnemyEntityID   = OtherEntityID; break;
+        case EntityKind_Bullet:         BulletEntityID  = OtherEntityID; break;
+    }
+
+    if (EnemyEntityID && BulletEntityID)
+    {
+        RemoveEntity(BulletEntityID);
+    }
+
+    if (PlayerEntityID && BulletEntityID)
+    {
+        RemoveEntity(BulletEntityID);
+    }
+}
+
 static void GameSetup(usize RandomSeed)
 {
     Game.Entropy.State = RandomSeed;
 
     EquipEntityKindUpdate(EntityKind_Player,        GamePlayerUpdate);
+    EquipEntityKindUpdate(EntityKind_Bullet,        GameBulletUpdate);
+    EquipEntityKindUpdate(EntityKind_Particle,      GameParticleUpdate);
     EquipEntityKindUpdate(EntityKind_EnemyGrunt,    GameEnemyGruntUpdate);
     EquipEntityKindUpdate(EntityKind_EnemyMover,    GameEnemyMoverUpdate);
     EquipEntityKindUpdate(EntityKind_EnemyArmored,  GameEnemyArmoredUpdate);
+
+    EquipCollisionHandler(GameHandleCollision);
 
     GameRestart();
 }
@@ -320,12 +545,13 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         1.0f        / FocalLength
     );
 
-    rect2 ViewRect = R2CenterSize(ViewCenter, ViewSize);
+    Game.ViewRect = R2CenterSize(ViewCenter, ViewSize);
 
-    RenderOrthographic2D(ViewRect);
+    RenderOrthographic2D(Game.ViewRect);
 
     UpdateAllEntities();
     IntegrateAllForces(DeltaTime);
+    HandleCollisions();
     RenderAllEntities();
 }
 
@@ -960,6 +1186,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         Player->ShootTimer = Maximum(0, Player->ShootTimer);
 
         v2 MoveDirection = V2(0, 0);
+
 
         if (InputIsButtonDown(InputButton_Shoot))       GamePlayerTryShoot();
 
