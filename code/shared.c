@@ -29,6 +29,8 @@ typedef u32 b32;
 #define Minimum(A, B) ((A) < (B) ? (A) : (B))
 #define Maximum(A, B) ((A) > (B) ? (A) : (B))
 
+#define Clamp(Min, Value, Max) Maximum(Min, Minimum(Max, Value))
+
 #define Absolute(Value) ((Value) < 0 ? -(Value) : (Value))
 
 #define SafeDivide0(A, B) ((Absolute(B) > 1e-14f) ? ((A) / (B)) : (0))

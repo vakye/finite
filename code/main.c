@@ -10,9 +10,6 @@
 #include "math.c"
 #include "input.c"
 #include "render.c"
-#include "physics.c"
-#include "weapon.c"
-#include "entity.c"
 #include "game.c"
 
 #include <sys/mman.h>
