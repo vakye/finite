@@ -5,6 +5,7 @@
 
 static b32  WaylandSetup            (void);
 static void WaylandShutdown         (void);
+static void WaylandToggleFullscreen (void);
 static b32  WaylandIsClosed         (void);
 static b32  WaylandShouldResize     (void);
 static void WaylandNotifyResized    (void);
@@ -84,6 +85,16 @@ static void WaylandShutdown(void)
 
     if (Wayland.Registry)       wl_registry_destroy(Wayland.Registry);
     if (Wayland.Display)        wl_display_disconnect(Wayland.Display);
+}
+
+static void WaylandToggleFullscreen(void)
+{
+    if (!Wayland.IsFullscreen)
+        xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
+    else
+        xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
+
+    Wayland.IsFullscreen = !Wayland.IsFullscreen;
 }
 
 static b32 WaylandIsClosed(void)
@@ -277,12 +288,7 @@ static void WaylandKeyboardKey(
         {
             if (IsDown)
             {
-                if (!Wayland.IsFullscreen)
-                    xdg_toplevel_set_fullscreen(Wayland.XdgTopLevel, Wayland.Output);
-                else
-                    xdg_toplevel_unset_fullscreen(Wayland.XdgTopLevel);
-
-                Wayland.IsFullscreen = !Wayland.IsFullscreen;
+                WaylandToggleFullscreen();
             }
         } break;
     }

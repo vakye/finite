@@ -29,9 +29,13 @@ static void         RenderPrepareForFrame   (void);
 static void         RenderOrthographic2D    (rect2 ViewRect);
 static void         RenderRect              (rect2 Rect, v4 Color);
 static void         RenderRectTextured      (rect2 Rect, v4 Color, rect2 RectUV, game_texture Texture);
-static void         RenderText              (string Text, v2 Position, v4 Color); // NOTE(vak): Expects window coordinates, and (0, 0) at top-left
+
+// NOTE(vak): Text renderer expects window coordinates, and (0, 0) at top-left.
+static v2           RenderText              (string Text, v2 Position, v4 Color); 
+static v2           RenderGetTextSize       (string Text);
 static f32          RenderGetTextSizeX      (string Text);
 static f32          RenderGetTextSizeY      (string Text);
+
 static render_batch RenderGetBatch          (void);
 
 // NOTE(vak): Implementation
@@ -91,7 +95,7 @@ static void RenderRectTextured(rect2 Rect, v4 Color, rect2 RectUV, game_texture 
     RenderRect->Texture = Texture;
 }
 
-static void RenderText(string Text, v2 Position, v4 Color)
+static v2 RenderText(string Text, v2 Position, v4 Color)
 {
     game_texture Texture    = GameTexture_Font5x9;
     u32 TextureWidth        = 128;
@@ -137,6 +141,14 @@ static void RenderText(string Text, v2 Position, v4 Color)
             CursorP.Y += Render.LineHeightScale * GlyphSize.Y;
         }
     }
+
+    return (CursorP);
+}
+
+static v2 RenderGetTextSize(string Text)
+{
+    v2 Result = V2(RenderGetTextSizeX(Text), RenderGetTextSizeY(Text));
+    return (Result);
 }
 
 static f32 RenderGetTextSizeX(string Text)

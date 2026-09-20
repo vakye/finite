@@ -13,6 +13,8 @@ typedef struct
     v2 P;
     f32 FocalLength;
     f32 AspectRatio;
+    u32 WindowWidth;
+    u32 WindowHeight;
 } camera;
 
 typedef struct
@@ -42,8 +44,13 @@ typedef struct
     v4 Color;
     timer* ShootTimer;
     f32 ShootCooldown;
+
+    f32 LastHealth;
     f32 Health;
     f32 MaxHealth;
+
+    f32 DamagedFadeRemaining;
+    f32 DamagedFadeTime;
 } player;
 
 typedef struct
@@ -78,14 +85,28 @@ typedef struct
     f32 DamagedFadeTime;
 } enemy;
 
+typedef struct
+{
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v4 Color;
+    f32 Value;
+    f32 TimeRemaining;
+    f32 TotalTime;
+} damage_text;
+
 static random_state Entropy = {0};
 static u32 Stage = 0;
+static f32 StageFadeRemaining = 0.0f;
+static f32 StageFadeTime = 0.0f;
 static camera Camera = {0};
 static player Player = {0};
 static timer Timers[4096] = {0};
 static bullet Bullets[4096] = {0};
 static particle Particles[4096] = {0};
 static enemy Enemies[4096] = {0};
+static damage_text DamageTexts[512] = {0};
 
 static timer* GameAddTimer(f32 InitialSecondsRemaining)
 {
@@ -108,6 +129,7 @@ static timer* GameAddTimer(f32 InitialSecondsRemaining)
 
 static void GameRemoveTimer(timer* Timer)
 {
+    if (!Timer) return;
     Timer->Alive = false;
 }
 
@@ -131,6 +153,7 @@ static bullet* GameAddBullet(void)
 
 static void GameRemoveBullet(bullet* Bullet)
 {
+    if (!Bullet) return;
     Bullet->Alive = false;
 }
 
@@ -154,6 +177,7 @@ static particle* GameAddParticle(void)
 
 static void GameRemoveParticle(particle* Particle)
 {
+    if (!Particle) return;
     Particle->Alive = false;
 }
 
@@ -182,8 +206,32 @@ static enemy* GameAddEnemy(void)
 
 static void GameRemoveEnemy(enemy* Enemy)
 {
+    if (!Enemy) return;
     GameRemoveTimer(Enemy->ShootTimer);
     Enemy->Alive = false;
+}
+
+static damage_text* GameAddDamageText(void)
+{
+    damage_text* DamageText = 0;
+
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+    {
+        if (DamageTexts[Index].TimeRemaining <= 0.0f)
+        {
+            DamageText = DamageTexts + Index;
+            memset(DamageText, 0, sizeof(damage_text));
+            break;
+        }
+    }
+
+    return (DamageText);
+}
+
+static void GameRemoveDamageText(damage_text* DamageText)
+{
+    if (!DamageText) return;
+    DamageText->TimeRemaining = 0.0f;
 }
 
 static void GameSpawnEnemy(void)
@@ -373,26 +421,83 @@ static void GameDoEnemyDeathParticles(enemy* Enemy)
         Particle->P = Enemy->P;
 
         Particle->DP = V2(
-            5.0f*RandomBilateral(&Entropy),
-            5.0f*RandomBilateral(&Entropy)
+            7.0f*RandomBilateral(&Entropy),
+            7.0f*RandomBilateral(&Entropy)
         );
 
-        Particle->DDP = V2(
-            5.0f*RandomBilateral(&Entropy),
-            5.0f*RandomBilateral(&Entropy)
-        );
+        Particle->DDP = Particle->DP;
 
-        Particle->Size = V2Scalar(0.4f + 0.1f*RandomUnilateral(&Entropy));
+        Particle->Size = V2Scalar(0.5f + 0.2f*RandomUnilateral(&Entropy));
 
         Particle->Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
     }
 }
 
+static void GameBulletHitPlayer(bullet* Bullet)
+{
+    f32 Knockback = 0.1f;
+    Player.DP = V2Add(Player.DP, V2MulScalar(Bullet->DP, Knockback));
+
+    Player.LastHealth = Player.Health;
+    Player.Health -= Bullet->Damage;
+    Player.DamagedFadeRemaining = Player.DamagedFadeTime;
+
+    damage_text* DamageText = GameAddDamageText();
+
+    DamageText->P = Player.P;
+    DamageText->DP = V2(4.0f*RandomBilateral(&Entropy), 5.0f);
+    DamageText->DDP = V2(DamageText->DP.X, -12.0f);
+    DamageText->Value = Bullet->Damage;
+    DamageText->Color = V4(1.0f, 0.5f, 0.5f, 1.0f);
+    DamageText->TotalTime = 0.8f;
+    DamageText->TimeRemaining = DamageText->TotalTime;
+
+    u32 SplatCount = 8;
+    for (u32 Index = 0; Index < SplatCount; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.3f + 0.1f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = Bullet->P;
+
+        Particle->DP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            +1.0f + 1.0f*RandomUnilateral(&Entropy)
+        );
+
+        Particle->DDP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            +1.0f + 2.0f*RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.1f + 0.3f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(1.0f, 1.0f, 1.0f, 0.8f);
+    }
+
+    GameRemoveBullet(Bullet);
+}
+
 static void GameBulletHitEnemy(enemy* Enemy, bullet* Bullet)
 {
+    f32 Knockback = 0.1f;
+    Enemy->DP = V2Add(Enemy->DP, V2MulScalar(Bullet->DP, Knockback));
+
     Enemy->LastHealth = Enemy->Health;
     Enemy->Health -= Bullet->Damage;
     Enemy->DamagedFadeRemaining = Enemy->DamagedFadeTime;
+
+    damage_text* DamageText = GameAddDamageText();
+
+    DamageText->P = Enemy->P;
+    DamageText->DP = V2(4.0f*RandomBilateral(&Entropy), 5.0f);
+    DamageText->DDP = V2(DamageText->DP.X, -12.0f);
+    DamageText->Color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+    DamageText->Value = Bullet->Damage;
+    DamageText->TotalTime = 0.8f;
+    DamageText->TimeRemaining = DamageText->TotalTime;
 
     u32 SplatCount = 8;
     for (u32 Index = 0; Index < SplatCount; Index++)
@@ -414,9 +519,9 @@ static void GameBulletHitEnemy(enemy* Enemy, bullet* Bullet)
             -1.0f - 2.0f*RandomUnilateral(&Entropy)
         );
 
-        Particle->Size = V2Scalar(0.1f + 0.1f*RandomUnilateral(&Entropy));
+        Particle->Size = V2Scalar(0.1f + 0.3f*RandomUnilateral(&Entropy));
 
-        Particle->Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
+        Particle->Color = V4(1.0f, 1.0f, 1.0f, 0.8f);
     }
 
     if (Enemy->Health <= 0.0f)
@@ -451,15 +556,29 @@ static void GameStartNewStage(void)
         GameSpawnEnemy();
 
     Stage++;
+    StageFadeTime = 2.75f;
+    StageFadeRemaining = StageFadeTime;
 }
 
 static void GameRestart(void)
 {
+    for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
+        GameRemoveEnemy(Enemies + Index);
+
+    for (usize Index = 0; Index < ArrayCount(Bullets); Index++)
+        GameRemoveBullet(Bullets + Index);
+
+    for (usize Index = 0; Index < ArrayCount(Particles); Index++)
+        GameRemoveParticle(Particles + Index);
+
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+        memset(DamageTexts + Index, 0, sizeof(damage_text));
+
     Player.P = V2(0.0f, -6.5f);
     Player.Size = V2(0.6f, 0.5f);
     Player.Color = V4(1.0f, 0.8f, 0.5f, 1.0f);
     Player.ShootTimer = GameAddTimer(0.0f);
-    Player.ShootCooldown = 0.15f;
+    Player.ShootCooldown = 0.1f;
     Player.MaxHealth = 200.0f;
     Player.Health = Player.MaxHealth;
 
@@ -473,11 +592,45 @@ static void GameSetup(usize RandomSeed)
     GameRestart();
 }
 
+// NOTE(vak): Assumes screen origin (0, 0) at bottom-left
+static v2 ConvertWorldToScreenP(v2 WorldP)
+{
+    v2 ViewSize = V2(
+        Camera.AspectRatio / Camera.FocalLength,
+        1.0f / Camera.FocalLength
+    );
+
+    rect2 ViewRect = R2CenterSize(Camera.P, ViewSize);
+
+    v2 Normalized = V2Div(V2Sub(WorldP, ViewRect.Min), ViewSize);
+    v2 ScreenP = V2Mul(Normalized, V2((f32)Camera.WindowWidth, (f32)Camera.WindowHeight));
+
+    return (ScreenP);
+}
+
+// NOTE(vak): Assumes screen origin (0, 0) at bottom-left
+static v2 ConvertScreenToWorldP(v2 ScreenP)
+{
+    v2 ViewSize = V2(
+        Camera.AspectRatio / Camera.FocalLength,
+        1.0f / Camera.FocalLength
+    );
+
+    rect2 ViewRect = R2CenterSize(Camera.P, ViewSize);
+
+    v2 Normalized = V2Div(ScreenP, V2((f32)Camera.WindowWidth, (f32)Camera.WindowHeight));
+    v2 WorldP = V2Add(ViewRect.Min, V2Mul(Normalized, ViewSize));
+
+    return (WorldP);
+}
+
 static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 {
     Camera.P = V2(0, 0);
     Camera.FocalLength = 0.05f;
     Camera.AspectRatio = (f32)Width / (f32)Height;
+    Camera.WindowWidth = Width;
+    Camera.WindowHeight = Height;
 
     v2 ViewSize = V2(
         Camera.AspectRatio / Camera.FocalLength,
@@ -491,6 +644,9 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
     if (GameAreAllEnemiesDead())
         GameStartNewStage();
 
+    if (Player.Health <= 0.0f)
+        GameRestart();
+
     for (usize Index = 0; Index < ArrayCount(Timers); Index++)
     {
         if (!Timers[Index].Alive) continue;
@@ -499,6 +655,16 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         Timer->SecondsRemaining -= DeltaTime;
         Timer->SecondsRemaining = Maximum(0, Timer->SecondsRemaining);
+    }
+
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+    {
+        damage_text* DamageText = DamageTexts + Index;
+        DamageText->TimeRemaining -= DeltaTime;
+        DamageText->TimeRemaining = Maximum(0, DamageText->TimeRemaining);
+
+        DamageText->DP = V2Add(DamageText->DP, V2MulScalar(DamageText->DDP, DeltaTime));
+        DamageText->P = V2Add(DamageText->P, V2MulScalar(DamageText->DP, DeltaTime));
     }
 
     for (usize Index = 0; Index < ArrayCount(Particles); Index++)
@@ -565,6 +731,23 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         }
     }
 
+    {
+        rect2 PlayerRect = R2CenterSize(Player.P, Player.Size);
+
+        for (usize BulletIndex = 0; BulletIndex < ArrayCount(Bullets); BulletIndex++)
+        {
+            if (!Bullets[BulletIndex].Alive) continue;
+            if (Bullets[BulletIndex].ShotByPlayer) continue;
+
+            bullet* Bullet = Bullets + BulletIndex;
+
+            rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
+
+            if (R2Intersects(PlayerRect, BulletRect))
+                GameBulletHitPlayer(Bullet);
+        }
+    }
+
     for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
     {
         if (!Enemies[Index].Alive) continue;
@@ -600,7 +783,12 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         v4 Color = V4Add(V4MulScalar(Enemy->Color, 1.0f-CurveT), V4MulScalar(DamagedColor, CurveT));
 
-        RenderRect(R2CenterSize(Enemy->P, Enemy->Size), Color);
+        rect2 EnemyRect = R2CenterSize(Enemy->P, Enemy->Size);
+        v2 EnemyOutlineApron = V2Scalar(0.1f);
+        v4 EnemyOutlineColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
+
+        RenderRect(R2Expand(EnemyRect, EnemyOutlineApron), EnemyOutlineColor);
+        RenderRect(EnemyRect, Color);
 
         Enemy->DamagedFadeRemaining -= DeltaTime;
         Enemy->DamagedFadeRemaining = Maximum(0, Enemy->DamagedFadeRemaining);
@@ -659,7 +847,12 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         Player.DP = V2Add(Player.DP, V2MulScalar(Player.DDP, DeltaTime));
         Player.P = V2Add(Player.P, V2MulScalar(Player.DP, DeltaTime));
 
-        RenderRect(R2CenterSize(Player.P, Player.Size), Player.Color);
+        rect2 PlayerRect = R2CenterSize(Player.P, Player.Size);
+        v2 PlayerOutlineApron = V2Scalar(0.1f);
+        v4 PlayerOutlineColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
+
+        RenderRect(R2Expand(PlayerRect, PlayerOutlineApron), PlayerOutlineColor);
+        RenderRect(PlayerRect, Player.Color);
 
         v4 HealthBarBorderColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
         v4 HealthBarColor = V4(0.4f, 0.2f, 0.2f, 1.0f);
@@ -687,6 +880,56 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         RenderRect(R2MinMax(HealthBarBorderMin, HealthBarBorderMax), HealthBarBorderColor);
         RenderRect(R2MinMax(HealthBarMin, HealthBarMax), HealthBarColor);
         RenderRect(R2MinMax(HealthMin, HealthMax), HealthColor);
+    }
+
+    RenderOrthographic2D(R2MinMax(
+        V2(0.0f, (f32)Height),
+        V2((f32)Width, 0.0f)
+    ));
+
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+    {
+        damage_text* DamageText = DamageTexts + Index;
+        if (DamageText->TimeRemaining <= 0.0f) continue;
+
+        v2 ScreenP = ConvertWorldToScreenP(DamageText->P);
+        ScreenP.Y = (f32)Camera.WindowHeight - ScreenP.Y;
+
+        char Buffer[64];
+        u32 Count = snprintf(Buffer, sizeof(Buffer), "%.1f", DamageText->Value);
+
+        f32 Alpha = DamageText->TimeRemaining / DamageText->TotalTime;
+        v4 Tint = V4(1, 1, 1, Alpha);
+
+        RenderText(StrData(Buffer, Count), ScreenP, V4Mul(DamageText->Color, Tint));
+    }
+
+    if (StageFadeRemaining > 0.0f)
+    {
+        char Buffer[64];
+        u32 Count = snprintf(Buffer, sizeof(Buffer), "STAGE %u", Stage);
+
+        string StageText = StrData(Buffer, Count);
+
+        v2 StageFadeScreenP = V2(0.5f*Camera.WindowWidth, 0.75f*Camera.WindowHeight);
+        StageFadeScreenP.Y = Camera.WindowHeight - StageFadeScreenP.Y;
+
+        f32 T = StageFadeRemaining / StageFadeTime;
+        f32 Alpha = 0.0f;
+
+        if (T <= 0.10f)
+            Alpha = Square(10.0f*T);
+        else if (T <= 0.90f)
+            Alpha = 1.0f;
+        else
+            Alpha = Square(10.0f - 10.0f*T);
+
+        StageFadeScreenP = V2Sub(StageFadeScreenP, V2ScalarMul(0.5f, RenderGetTextSize(StageText)));
+
+        RenderText(StageText, StageFadeScreenP, V4(0.9f, 0.9f, 0.9f, Alpha));
+
+        StageFadeRemaining -= DeltaTime;
+        StageFadeRemaining = Maximum(0, StageFadeRemaining);
     }
 }
 

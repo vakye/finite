@@ -31,6 +31,8 @@ s32 main(s32 ArgCount, char* Args[])
         return (1);
     }
 
+    WaylandToggleFullscreen();
+
     static u32 WhiteImageRGBA[2 * 2] =
     {
         0xFFFFFFFF, 0xFFFFFFFF,
