@@ -35,6 +35,7 @@ static v2           RenderText              (string Text, v2 Position, v4 Color)
 static v2           RenderGetTextSize       (string Text);
 static f32          RenderGetTextSizeX      (string Text);
 static f32          RenderGetTextSizeY      (string Text);
+static f32          RenderGetLineHeight     (void);
 
 static render_batch RenderGetBatch          (void);
 
@@ -197,6 +198,13 @@ static f32 RenderGetTextSizeY(string Text)
     v2 GlyphSize = V2(Render.FontCellWidth * Render.TextScale, Render.FontCellHeight * Render.TextScale);
     f32 Result = LineCount * Render.LineHeightScale * GlyphSize.Y;
 
+    return (Result);
+}
+
+static f32 RenderGetLineHeight(void)
+{
+    f32 GlyphSizeY = Render.FontCellHeight * Render.TextScale;
+    f32 Result = Render.LineHeightScale * GlyphSizeY;
     return (Result);
 }
 

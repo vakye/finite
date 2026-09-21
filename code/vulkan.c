@@ -672,7 +672,8 @@ static b32 VulkanRender(void)
 
 static void VulkanError(char* Message)
 {
-    fprintf(stderr, "[vulkan]: %s\n", Message);
+    // TODO(vak): Implement this using write()
+    //fprintf(stderr, "[vulkan]: %s\n", Message);
 }
 
 static b32 VulkanCreateInstance(void)
@@ -1430,7 +1431,7 @@ static b32 VulkanCreateTexture(
     {
         default:
         {
-            fprintf(stderr, "unknown pixel kind in VulkanCreateTexture().");
+            VulkanError("unknown pixel kind in VulkanCreateTexture().");
             return (false);
         } break;
 

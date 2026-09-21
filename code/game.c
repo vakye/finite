@@ -8,6 +8,25 @@ static void GameUpdateAndRender (f32 DeltaTime, u32 Width, u32 Height);
 
 // NOTE(vak): Implementation
 
+typedef enum
+{
+    ShotKind_Single = 0,
+    ShotKind_Triple,
+} shot_kind;
+
+typedef struct
+{
+    string Name;
+    f32 Damage;
+    f32 Cooldown;
+    shot_kind ShotKind;
+} weapon;
+
+#define WeaponNone    (weapon){Str("None"),     0.0f,  -1.0f,  ShotKind_Single}
+#define WeaponPistol  (weapon){Str("Pistol"),   30.0f,  0.2f,  ShotKind_Single}
+#define WeaponRifle   (weapon){Str("Rifle"),    20.0f,  0.1f,  ShotKind_Single}
+#define WeaponShotgun (weapon){Str("Shotgun"),  15.0f,  0.2f,  ShotKind_Triple}
+
 typedef struct
 {
     v2 P;
@@ -43,7 +62,8 @@ typedef struct
     v2 Size;
     v4 Color;
     timer* ShootTimer;
-    f32 ShootCooldown;
+    u32 WeaponIndex;
+    weapon WeaponSlots[3];
 
     f32 LastHealth;
     f32 Health;
@@ -263,22 +283,50 @@ static void GameSpawnEnemy(void)
     Enemy->DamagedFadeTime = 0.2f;
 }
 
+static void GameSpawnPlayerBullet(v2 SpawnP, v2 Size, f32 VelocityX, f32 AccelerationX)
+{
+    bullet* Bullet = GameAddBullet();
+    if (!Bullet)
+        return;
+
+    weapon* CurrentWeapon = Player.WeaponSlots + Player.WeaponIndex;
+
+    Bullet->ShotByPlayer = true;
+    Bullet->Damage = CurrentWeapon->Damage;
+    Bullet->Size = Size;
+    Bullet->P = SpawnP;
+    Bullet->DP = V2(VelocityX, Maximum(0, Player.DP.Y) + 16.0f);
+    Bullet->DDP = V2(AccelerationX, 26.0f);
+    Bullet->Color = V4(0.4f, 0.7f, 0.9f, 1.0f);
+}
+
 static void GamePlayerShoot(void)
 {
     if (Player.ShootTimer->SecondsRemaining > 0.0f)
         return;
 
-    bullet* Bullet = GameAddBullet();
-    if (!Bullet)
+    weapon* CurrentWeapon = Player.WeaponSlots + Player.WeaponIndex;
+
+    if (CurrentWeapon->Cooldown < 0.0f)
         return;
 
-    Bullet->ShotByPlayer = true;
-    Bullet->Damage = 40.0f;
-    Bullet->Size = V2(0.15f, 0.25f);
-    Bullet->P = V2(Player.P.X, Player.P.Y + 0.5f*(Player.Size.Y + Bullet->Size.Y));
-    Bullet->DP = V2(0.0f, Maximum(0, Player.DP.Y) + 16.0f);
-    Bullet->DDP = V2(0.0f, 26.0f);
-    Bullet->Color = V4(0.4f, 0.7f, 0.9f, 1.0f);
+    v2 BulletSize = V2(0.15f, 0.25f);
+    v2 BulletSpawnP = V2(Player.P.X, Player.P.Y + 0.5f*(Player.Size.Y + BulletSize.Y));
+
+    switch (CurrentWeapon->ShotKind)
+    {
+        case ShotKind_Single:
+        {
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, 0, 0);
+        } break;
+
+        case ShotKind_Triple:
+        {
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, -1.5f, -1.5f);
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize,  0.0f,  0.0f);
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, +1.5f, +1.5f);
+        } break;
+    }
 
     u32 SparkCount = 4;
     for (u32 Index = 0; Index < SparkCount; Index++)
@@ -288,7 +336,7 @@ static void GamePlayerShoot(void)
         Particle->TotalSeconds = 0.1f + 0.2f*RandomUnilateral(&Entropy);
         Particle->RemainingSeconds = Particle->TotalSeconds;
 
-        Particle->P = Bullet->P;
+        Particle->P = BulletSpawnP;
 
         Particle->DP = V2(
             0.0f + 2.0f * RandomBilateral(&Entropy),
@@ -313,7 +361,7 @@ static void GamePlayerShoot(void)
         Particle->TotalSeconds = 0.2f + 0.2f*RandomUnilateral(&Entropy);
         Particle->RemainingSeconds = Particle->TotalSeconds;
 
-        Particle->P = Bullet->P;
+        Particle->P = BulletSpawnP;
 
         Particle->DP = V2(
             0.0f + 3.0f * RandomBilateral(&Entropy),
@@ -330,7 +378,7 @@ static void GamePlayerShoot(void)
         Particle->Color = V4(0.6f, 0.6f, 0.6f, 1.0f);
     }
 
-    Player.ShootTimer->SecondsRemaining = Player.ShootCooldown;
+    Player.ShootTimer->SecondsRemaining = CurrentWeapon->Cooldown;
 }
 
 static void GameEnemyShoot(enemy* Enemy)
@@ -551,7 +599,7 @@ static b32 GameAreAllEnemiesDead(void)
 
 static void GameStartNewStage(void)
 {
-    u32 EnemyCount = 10 + Stage;
+    u32 EnemyCount = 3 + Stage;
     for (u32 Index = 0; Index < EnemyCount; Index++)
         GameSpawnEnemy();
 
@@ -574,13 +622,20 @@ static void GameRestart(void)
     for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
         memset(DamageTexts + Index, 0, sizeof(damage_text));
 
+    memset(&Player, 0, sizeof(player));
+
     Player.P = V2(0.0f, -6.5f);
     Player.Size = V2(0.6f, 0.5f);
     Player.Color = V4(1.0f, 0.8f, 0.5f, 1.0f);
     Player.ShootTimer = GameAddTimer(0.0f);
-    Player.ShootCooldown = 0.1f;
     Player.MaxHealth = 200.0f;
     Player.Health = Player.MaxHealth;
+    Player.DamagedFadeTime = 0.2f;
+
+    Player.WeaponSlots[0] = WeaponRifle;
+    Player.WeaponSlots[1] = WeaponPistol;
+    Player.WeaponSlots[2] = WeaponShotgun;
+    Player.WeaponIndex = 0;
 
     Stage = 0;
     GameStartNewStage();
@@ -824,6 +879,26 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
     }
 
     {
+        if (InputIsButtonDown(InputButton_Weapon1)) Player.WeaponIndex = 0;
+        if (InputIsButtonDown(InputButton_Weapon2)) Player.WeaponIndex = 1;
+        if (InputIsButtonDown(InputButton_Weapon3)) Player.WeaponIndex = 2;
+
+        if (InputIsButtonPressed(InputButton_PrevWeapon))
+        {
+            if (Player.WeaponIndex == 0)
+                Player.WeaponIndex = ArrayCount(Player.WeaponSlots) - 1;
+            else
+                Player.WeaponIndex = (Player.WeaponIndex - 1);
+        }
+
+        if (InputIsButtonPressed(InputButton_NextWeapon))
+        {
+            if (Player.WeaponIndex + 1 == ArrayCount(Player.WeaponSlots))
+                Player.WeaponIndex = (0);
+            else
+                Player.WeaponIndex = (Player.WeaponIndex + 1);
+        }
+
         if (InputIsButtonDown(InputButton_Shoot))
             GamePlayerShoot();
 
@@ -851,8 +926,17 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         v2 PlayerOutlineApron = V2Scalar(0.1f);
         v4 PlayerOutlineColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
 
+        v4 DamagedColor = V4(1.0f, 0.3f, 0.3f, 1.0f);
+        f32 DamagedT = Player.DamagedFadeRemaining / Player.DamagedFadeTime;
+        f32 CurveT = -4.0f*Square(DamagedT) + 4.0f*DamagedT;
+
+        v4 Color = V4Add(V4MulScalar(Player.Color, 1.0f-CurveT), V4MulScalar(DamagedColor, CurveT));
+
+        Player.DamagedFadeRemaining -= DeltaTime;
+        Player.DamagedFadeRemaining = Maximum(0, Player.DamagedFadeRemaining);
+
         RenderRect(R2Expand(PlayerRect, PlayerOutlineApron), PlayerOutlineColor);
-        RenderRect(PlayerRect, Player.Color);
+        RenderRect(PlayerRect, Color);
 
         v4 HealthBarBorderColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
         v4 HealthBarColor = V4(0.4f, 0.2f, 0.2f, 1.0f);
@@ -869,7 +953,9 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         v2 HealthBarMax = V2Add(HealthBarMin, HealthBarSize);
 
-        f32 HealthPercent = Player.Health / Player.MaxHealth;
+        f32 LastHealthPercent = Player.LastHealth / Player.MaxHealth;
+        f32 CurHealthPercent = Player.Health / Player.MaxHealth;
+        f32 HealthPercent = LastHealthPercent + (CurHealthPercent - LastHealthPercent)*Square(1.0f - DamagedT);
 
         v2 HealthMin = HealthBarMin;
         v2 HealthMax = V2Add(HealthMin, V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y));
@@ -895,8 +981,27 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         v2 ScreenP = ConvertWorldToScreenP(DamageText->P);
         ScreenP.Y = (f32)Camera.WindowHeight - ScreenP.Y;
 
-        char Buffer[64];
-        u32 Count = snprintf(Buffer, sizeof(Buffer), "%.1f", DamageText->Value);
+        char Buffer[64] = {0};
+        usize IntegerPart = (usize)DamageText->Value;
+        f32 DecimalPart = DamageText->Value - IntegerPart;
+
+        u32 Count = 0;
+
+        do
+        {
+            Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+            IntegerPart /= 10;
+        } while (IntegerPart);
+
+        for (u32 Index = 0; Index < Count/2; Index++)
+        {
+            char Temp = Buffer[Index];
+            Buffer[Index] = Buffer[Count - Index - 1];
+            Buffer[Count - Index - 1] = Temp;
+        }
+
+        Buffer[Count++] = '.';
+        Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
 
         f32 Alpha = DamageText->TimeRemaining / DamageText->TotalTime;
         v4 Tint = V4(1, 1, 1, Alpha);
@@ -907,7 +1012,27 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
     if (StageFadeRemaining > 0.0f)
     {
         char Buffer[64];
-        u32 Count = snprintf(Buffer, sizeof(Buffer), "STAGE %u", Stage);
+        u32 Count = sizeof("STAGE ") - 1;
+
+        memcpy(Buffer, "STAGE ", sizeof("STAGE ") - 1);
+
+        u32 DigitCount = 0;
+
+        u32 Value = Stage;
+        do
+        {
+            Buffer[Count + DigitCount++] = '0' + (char)(Value % 10);
+            Value /= 10;
+        } while (Value);
+
+        for (u32 Index = 0; Index < DigitCount/2; Index++)
+        {
+            char Temp = Buffer[Count + Index];
+            Buffer[Count + Index] = Buffer[Count + DigitCount - Index - 1];
+            Buffer[Count + DigitCount - Index - 1] = Temp;
+        }
+
+        Count += DigitCount;
 
         string StageText = StrData(Buffer, Count);
 
@@ -930,6 +1055,100 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         StageFadeRemaining -= DeltaTime;
         StageFadeRemaining = Maximum(0, StageFadeRemaining);
+    }
+
+    {
+        v2 Pad = V2(16, 16);
+        v2 P = Pad;
+
+        {
+            char Buffer[64] = {0};
+            usize IntegerPart = (usize)Player.Health;
+            f32 DecimalPart = Player.Health - IntegerPart;
+
+            u32 Count = 0;
+
+            do
+            {
+                Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                IntegerPart /= 10;
+            } while (IntegerPart);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            Buffer[Count++] = '.';
+            Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+            string HealthText = StrData(Buffer, Count);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("Health: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            Caret = RenderText(HealthText, Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+            P.Y += RenderGetLineHeight();
+        }
+
+        {
+            RenderText(Str("Weapons: "), P, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            P.Y += RenderGetLineHeight();
+
+            for (usize Index = 0; Index < ArrayCount(Player.WeaponSlots); Index++)
+            {
+                char Buffer[] = "[ ] ";
+                Buffer[1] = '0' + (char)((Index + 1) % 10);
+
+                v4 Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
+
+                if (Index == Player.WeaponIndex)
+                    Color = V4(0.4f, 0.6f, 0.9f, 1.0f);
+
+                v2 Caret = P;
+                Caret = RenderText(Str("    "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+                Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+                Caret = RenderText(Player.WeaponSlots[Index].Name, Caret, Color);
+
+                if (Index == Player.WeaponIndex)
+                    Caret = RenderText(Str(" <- "), Caret, V4(0.9f, 0.7f, 0.6f, 1.0f));
+
+                P.Y += RenderGetLineHeight();
+            }
+        }
+
+        {
+            char Buffer[64] = {0};
+
+            u32 Count = 0;
+
+            usize Value = Stage;
+            do
+            {
+                Buffer[Count++] = '0' + (char)(Value % 10);
+                Value /= 10;
+            } while (Value);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            string StageText = StrData(Buffer, Count);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("Stage: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            Caret = RenderText(StageText, Caret, V4(0.6f, 0.9f, 0.6f, 1.0f));
+            P.Y += RenderGetLineHeight();
+        }
+
+        {
+            v2 Caret = P;
+            Caret = RenderText(Str("Items:\n"), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+        }
     }
 }
 

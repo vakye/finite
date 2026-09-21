@@ -41,6 +41,27 @@ typedef u32 b32;
 #define true  (1)
 #define false (0)
 
+void* memset(void* DestInit, s32 Byte, usize Size)
+{
+    u8* Dest = (u8*)DestInit;
+
+    while (Size--)
+        *Dest++ = (u8)Byte;
+
+    return (DestInit);
+}
+
+void* memcpy(void* DestInit, void* SourceInit, usize Size)
+{
+    u8* Dest = (u8*)DestInit;
+    u8* Source = (u8*)SourceInit;
+
+    while (Size--)
+        *Dest++ = *Source++;
+
+    return (DestInit);
+}
+
 typedef struct
 {
     char* Data;
@@ -49,4 +70,32 @@ typedef struct
 
 #define Str(Literal)        (string){Literal, sizeof(Literal) - 1}
 #define StrData(Data, Size) (string){Data, Size}
+
+static string CString(const char* Data)
+{
+    string Result = StrData((char*)Data, 0);
+    if (Data)
+    {
+        while (Data[Result.Size] != '\0')
+            Result.Size++;
+    }
+
+    return (Result);
+}
+
+static b32 StringEqual(string A, string B)
+{
+    b32 Result = (A.Size == B.Size);
+
+    for (usize Index = 0; Index < A.Size; Index++)
+    {
+        if (A.Data[Index] != B.Data[Index])
+        {
+            Result = false;
+            break;
+        }
+    }
+
+    return (Result);
+}
 

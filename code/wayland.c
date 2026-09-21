@@ -16,8 +16,6 @@ static void WaylandPresent          (void);
 
 // NOTE(vak): Implementation
 
-#include <sys/mman.h>
-#include <sys/unistd.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 #include "xdg-shell-client.h"
@@ -135,7 +133,8 @@ static void WaylandPresent(void)
 
 static void WaylandError(char* Message)
 {
-    fprintf(stderr, "[wayland]: %s\n", Message);
+    // TODO(vak): Implement this using write()
+    //fprintf(stderr, "[wayland]: %s\n", Message);
 }
 
 // NOTE(vak): Pointer & Keyboard
@@ -278,6 +277,13 @@ static void WaylandKeyboardKey(
 
     switch (KeySym)
     {
+        case XKB_KEY_1:                     InputReportButton(InputButton_Weapon1,      IsDown);    break;
+        case XKB_KEY_2:                     InputReportButton(InputButton_Weapon2,      IsDown);    break;
+        case XKB_KEY_3:                     InputReportButton(InputButton_Weapon3,      IsDown);    break;
+
+        case XKB_KEY_q:                     InputReportButton(InputButton_PrevWeapon,   IsDown);    break;
+        case XKB_KEY_e:                     InputReportButton(InputButton_NextWeapon,   IsDown);    break;
+
         case XKB_KEY_w: case XKB_KEY_Up:    InputReportButton(InputButton_MoveUp,       IsDown);    break;
         case XKB_KEY_a: case XKB_KEY_Left:  InputReportButton(InputButton_MoveLeft,     IsDown);    break;
         case XKB_KEY_s: case XKB_KEY_Down:  InputReportButton(InputButton_MoveDown,     IsDown);    break;
@@ -369,29 +375,31 @@ static void WaylandHandleRegistryGlobal(
     void*                   Data, 
     struct wl_registry*     Registry, 
     u32                     Name, 
-    const char*             Interface, 
+    const char*             InterfaceInit, 
     u32                     Version 
 )
 {
-    if (strcmp(Interface, wl_compositor_interface.name) == 0)
+    string Interface = CString(InterfaceInit);
+
+    if (StringEqual(Interface, CString(wl_compositor_interface.name)))
     {
         Wayland.Compositor = wl_registry_bind(Registry, Name, &wl_compositor_interface, 1);
     }
-    else if (strcmp(Interface, xdg_wm_base_interface.name) == 0)
+    else if (StringEqual(Interface, CString(xdg_wm_base_interface.name)))
     {
         Wayland.XdgWmBase = wl_registry_bind(Registry, Name, &xdg_wm_base_interface, 1);
 
         if (Wayland.XdgWmBase)
             xdg_wm_base_add_listener(Wayland.XdgWmBase, &WaylandXdgWmBaseListener, 0);
     }
-    else if (strcmp(Interface, wl_seat_interface.name) == 0)
+    else if (StringEqual(Interface, CString(wl_seat_interface.name)))
     {
         Wayland.Seat = wl_registry_bind(Registry, Name, &wl_seat_interface, 1);
 
         if (Wayland.Seat)
             wl_seat_add_listener(Wayland.Seat, &WaylandSeatListener, 0);
     }
-    else if (strcmp(Interface, wl_output_interface.name) == 0)
+    else if (StringEqual(Interface, CString(wl_output_interface.name)))
     {
         Wayland.Output = wl_registry_bind(Registry, Name, &wl_output_interface, 1);
     }

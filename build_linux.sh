@@ -11,30 +11,38 @@ for ShaderFile in *.{vert,frag,comp,mesh,task}; do
 done
 cd ../..
 
-SourceFile="code/main.c"
+SourceFile="code/linux_main.c"
+ObjectFile="build/linux_main.o"
 OutputFile="build/finite"
 
 CompileFlags=" \
+    -c \
     -g \
     -O0 \
-    -std=gnu11 \
+    -std=c11 \
     -ffreestanding \
     -fpie \
     -fno-stack-protector \
+    -fno-strict-aliasing \
+    -nostdlib \
     -Wall -Wextra -Wpedantic -Werror \
     -Wno-unused-parameter \
     -Wno-unused-variable \
     -Wno-unused-function \
     -Wno-unused-but-set-variable \
     -Wno-switch \
-    -o $OutputFile"
+    -o $ObjectFile"
 
 LinkFlags=" \
-    -fuse-ld=lld \
-    -Wl,-lwayland-client \
-    -Wl,-lxkbcommon"
+    -o $OutputFile \
+    -L /usr/lib"
 
-clang $CompileFlags $SourceFile $LinkFlags
+LinkLibraries=" \
+    -lwayland-client \
+    -lxkbcommon"
+
+clang $CompileFlags $SourceFile
+clang $LinkFlags $ObjectFile $LinkLibraries
 
 if [ $? -eq 0 ]; then
     echo "$(basename $SourceFile)";
