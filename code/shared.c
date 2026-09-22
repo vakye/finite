@@ -35,6 +35,11 @@ typedef u32 b32;
 
 #define SafeDivide0(A, B) ((Absolute(B) > 1e-14f) ? ((A) / (B)) : (0))
 
+#define KB(Amount) ((ssize)(Amount) << 10)
+#define MB(Amount) ((ssize)(Amount) << 20)
+#define GB(Amount) ((ssize)(Amount) << 30)
+#define TB(Amount) ((ssize)(Amount) << 40)
+
 #define U32Max (~0U)
 #define U64Max (~0ULL)
 
@@ -68,8 +73,19 @@ typedef struct
     usize Size;
 } string;
 
+#define NilString           (string){0}
+
 #define Str(Literal)        (string){Literal, sizeof(Literal) - 1}
 #define StrData(Data, Size) (string){Data, Size}
+
+#define StaticStr(Literal)        {Literal, sizeof(Literal) - 1}
+#define StaticStrData(Data, Size) {Data, Size}
+
+static b32 IsNilString(string String)
+{
+    b32 Result = (!(String.Data) || !(String.Size));
+    return (Result);
+}
 
 static string CString(const char* Data)
 {
@@ -83,6 +99,15 @@ static string CString(const char* Data)
     return (Result);
 }
 
+static string StringView(string String, usize From, usize Size)
+{
+    From = Minimum(From, String.Size);
+    Size = Minimum(Size, String.Size - From);
+
+    string Result = StrData(String.Data + From, Size);
+    return (Result);
+}
+
 static b32 StringEqual(string A, string B)
 {
     b32 Result = (A.Size == B.Size);
@@ -90,6 +115,22 @@ static b32 StringEqual(string A, string B)
     for (usize Index = 0; Index < A.Size; Index++)
     {
         if (A.Data[Index] != B.Data[Index])
+        {
+            Result = false;
+            break;
+        }
+    }
+
+    return (Result);
+}
+
+static b32 StringStartsWith(string String, string Match)
+{
+    b32 Result = (String.Size >= Match.Size);
+
+    for (usize Index = 0; Index < Match.Size; Index++)
+    {
+        if (String.Data[Index] != Match.Data[Index])
         {
             Result = false;
             break;

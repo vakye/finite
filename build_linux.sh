@@ -19,7 +19,7 @@ CompileFlags=" \
     -c \
     -g \
     -O0 \
-    -std=c11 \
+    -std=gnu11 \
     -ffreestanding \
     -fpie \
     -fno-stack-protector \
@@ -39,7 +39,8 @@ LinkFlags=" \
 
 LinkLibraries=" \
     -lwayland-client \
-    -lxkbcommon"
+    -lxkbcommon \
+    -lasound"
 
 clang $CompileFlags $SourceFile
 clang $LinkFlags $ObjectFile $LinkLibraries

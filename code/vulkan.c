@@ -1,8 +1,11 @@
 
-#pragma once
+// NOTE(vak): Render backend implementation using the 
+// Vulkan API
 
 // NOTE(vak): VK_USE_PLATFORM_* is defined by the user
 // before including this file.
+
+#pragma once
 
 // NOTE(vak): Cheatsheet
 
@@ -34,6 +37,8 @@ static b32  VulkanRender    (void);
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
+
+// TODO(vak): Stop relying on volk, and instead write a simple Vulkan loader instead.
 
 #include "volk.h"
 #include "volk.c"
@@ -102,7 +107,7 @@ typedef struct
 
 static vulkan_state Vulkan = {0};
 
-static void VulkanError(char* Message);
+static void VulkanError(string Message);
 
 static b32 VulkanCreateInstance         (void);
 static b32 VulkanCreateSurface          (void);
@@ -279,7 +284,7 @@ static b32 VulkanResize(u32 Width, u32 Height)
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {
-        VulkanError("failed to wait until device idle before swapchain resize");
+        VulkanError(Str("failed to wait until device idle before swapchain resize"));
         return (false);
     }
 
@@ -299,7 +304,7 @@ static b32 VulkanResize(u32 Width, u32 Height)
         &SurfaceCaps
     ))
     {
-        VulkanError("failed to get physical device surface capabilities");
+        VulkanError(Str("failed to get physical device surface capabilities"));
         return (false);
     }
 
@@ -326,7 +331,7 @@ static b32 VulkanResize(u32 Width, u32 Height)
 
     if (vkCreateSwapchainKHR(Vulkan.Device, &SwapchainInfo, 0, &Vulkan.Swapchain))
     {
-        VulkanError("failed to create swapchain");
+        VulkanError(Str("failed to create swapchain"));
         return (false);
     }
 
@@ -334,7 +339,7 @@ static b32 VulkanResize(u32 Width, u32 Height)
 
     if (vkGetSwapchainImagesKHR(Vulkan.Device, Vulkan.Swapchain, &Vulkan.SwapchainImageCount, Vulkan.SwapchainImages))
     {
-        VulkanError("failed to get swapchain images");
+        VulkanError(Str("failed to get swapchain images"));
         return (false);
     }
 
@@ -363,14 +368,14 @@ static b32 VulkanResize(u32 Width, u32 Height)
 
         if (vkCreateImageView(Vulkan.Device, &ImageViewInfo, 0, &Vulkan.SwapchainImageViews[Index]))
         {
-            VulkanError("failed to create swapchain image view");
+            VulkanError(Str("failed to create swapchain image view"));
             return (false);
         }
     }
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {
-        VulkanError("failed to wait until device idle after swapchain resize");
+        VulkanError(Str("failed to wait until device idle after swapchain resize"));
         return (false);
     }
 
@@ -391,13 +396,13 @@ static b32 VulkanRender(void)
 
     if (MaxVertexCount < VerticesNeeded)
     {
-        VulkanError("vertex buffer isn't large enough for render batch");
+        VulkanError(Str("vertex buffer isn't large enough for render batch"));
         NotEnoughSpace = true;
     }
 
     if (MaxIndexCount < IndicesNeeded)
     {
-        VulkanError("index buffer isn't large enough for render batch");
+        VulkanError(Str("index buffer isn't large enough for render batch"));
         NotEnoughSpace = true;
     }
 
@@ -450,7 +455,7 @@ static b32 VulkanRender(void)
         &ImageIndex
     ))
     {
-        VulkanError("failed to acquire image");
+        VulkanError(Str("failed to acquire image"));
         return (false);
     }
 
@@ -466,13 +471,13 @@ static b32 VulkanRender(void)
 
     if (vkResetCommandBuffer(CommandBuffer, 0))
     {
-        VulkanError("failed to reset command buffer");
+        VulkanError(Str("failed to reset command buffer"));
         return (false);
     }
 
     if (vkBeginCommandBuffer(CommandBuffer, &BeginInfo))
     {
-        VulkanError("failed to begin command buffer");
+        VulkanError(Str("failed to begin command buffer"));
         return (false);
     }
 
@@ -621,7 +626,7 @@ static b32 VulkanRender(void)
 
     if (vkEndCommandBuffer(CommandBuffer))
     {
-        VulkanError("failed to end command buffer");
+        VulkanError(Str("failed to end command buffer"));
         return (0);
     }
 
@@ -641,7 +646,7 @@ static b32 VulkanRender(void)
 
     if (vkQueueSubmit(Vulkan.Queue, 1, &SubmitInfo, 0))
     {
-        VulkanError("failed to submit command buffer for rendering");
+        VulkanError(Str("failed to submit command buffer for rendering"));
         return (false);
     }
 
@@ -657,30 +662,31 @@ static b32 VulkanRender(void)
 
     if (vkQueuePresentKHR(Vulkan.Queue, &PresentInfo))
     {
-        VulkanError("failed to present");
+        VulkanError(Str("failed to present"));
         return (false);
     }
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {
-        VulkanError("failed to wait until device idle after render");
+        VulkanError(Str("failed to wait until device idle after render"));
         return (false);
     }
 
     return (true);
 }
 
-static void VulkanError(char* Message)
+static void VulkanError(string Message)
 {
-    // TODO(vak): Implement this using write()
-    //fprintf(stderr, "[vulkan]: %s\n", Message);
+    PrintErr(Str("[vulkan]: "));
+    PrintErr(Message);
+    PrintErr(Str("\n"));
 }
 
 static b32 VulkanCreateInstance(void)
 {
     if (volkInitialize())
     {
-        VulkanError("failed to initialize volk");
+        VulkanError(Str("failed to initialize volk"));
         return (false);
     }
 
@@ -688,7 +694,7 @@ static b32 VulkanCreateInstance(void)
 
     if (volkGetInstanceVersion() < Vulkan.VersionOfAPI)
     {
-        VulkanError("vulkan 1.4 or higher is required");
+        VulkanError(Str("vulkan 1.4 or higher is required"));
         return (false);
     }
 
@@ -728,7 +734,7 @@ static b32 VulkanCreateInstance(void)
 
     if (vkCreateInstance(&InstanceInfo, 0, &Vulkan.Instance))
     {
-        VulkanError("failed to create instance");
+        VulkanError(Str("failed to create instance"));
         return (false);
     }
 
@@ -749,7 +755,7 @@ static b32 VulkanCreateSurface(void)
 
         if (vkCreateWaylandSurfaceKHR(Vulkan.Instance, &WaylandSurfaceInfo, 0, &Vulkan.Surface))
         {
-            VulkanError("failed to create wayland surface");
+            VulkanError(Str("failed to create wayland surface"));
             return (false);
         }
     #else
@@ -767,13 +773,13 @@ static b32 VulkanPickPhysicalDevice(void)
 
     if (vkEnumeratePhysicalDevices(Vulkan.Instance, &PhysicalDeviceCount, PhysicalDevices))
     {
-        VulkanError("failed to enumerate physical devices");
+        VulkanError(Str("failed to enumerate physical devices"));
         return (false);
     }
 
     if (PhysicalDeviceCount == 0)
     {
-        VulkanError("no GPU available");
+        VulkanError(Str("no GPU available"));
         return (false);
     }
 
@@ -802,7 +808,7 @@ static b32 VulkanPickPhysicalDevice(void)
 
     if (!Vulkan.PhysicalDevice)
     {
-        VulkanError("no suitable GPU were found");
+        VulkanError(Str("no suitable GPU were found"));
         return (false);
     }
 
@@ -823,7 +829,7 @@ static b32 VulkanSelectQueueFamily(void)
 
     if (QueueFamilyCount == 0)
     {
-        VulkanError("GPU has no available queue family");
+        VulkanError(Str("GPU has no available queue family"));
         return (false);
     }
 
@@ -847,7 +853,7 @@ static b32 VulkanSelectQueueFamily(void)
 
     if (Vulkan.QueueFamilyIndex == U32Max)
     {
-        VulkanError("unable to find a suitable queue family");
+        VulkanError(Str("unable to find a suitable queue family"));
         return (false);
     }
 
@@ -892,7 +898,7 @@ static b32 VulkanCreateDevice(void)
 
     if (vkCreateDevice(Vulkan.PhysicalDevice, &DeviceInfo, 0, &Vulkan.Device))
     {
-        VulkanError("failed to create device");
+        VulkanError(Str("failed to create device"));
         return (false);
     }
 
@@ -916,7 +922,7 @@ static b32 VulkanCreateCommandPool(void)
 
     if (vkCreateCommandPool(Vulkan.Device, &CommandPoolInfo, 0, &Vulkan.CommandPool))
     {
-        VulkanError("failed to create command pool");
+        VulkanError(Str("failed to create command pool"));
         return (false);
     }
 
@@ -935,7 +941,7 @@ static b32 VulkanAllocateCommandBuffer(void)
 
     if (vkAllocateCommandBuffers(Vulkan.Device, &CommandBufferInfo, &Vulkan.CommandBuffer))
     {
-        VulkanError("failed to allocate command buffer");
+        VulkanError(Str("failed to allocate command buffer"));
         return (false);
     }
 
@@ -951,13 +957,13 @@ static b32 VulkanCreateSemaphores(void)
 
     if (vkCreateSemaphore(Vulkan.Device, &SemaphoreInfo, 0, &Vulkan.AcquireSemaphore))
     {
-        VulkanError("failed to create acquire semaphore");
+        VulkanError(Str("failed to create acquire semaphore"));
         return (false);
     }
 
     if (vkCreateSemaphore(Vulkan.Device, &SemaphoreInfo, 0, &Vulkan.SubmitSemaphore))
     {
-        VulkanError("failed to create submit semaphore");
+        VulkanError(Str("failed to create submit semaphore"));
         return (false);
     }
 
@@ -992,7 +998,7 @@ static b32 VulkanCreateSetLayout(void)
 
     if (vkCreateDescriptorSetLayout(Vulkan.Device, &SetLayoutInfo, 0, &Vulkan.SetLayout))
     {
-        VulkanError("failed to create descriptor set layout");
+        VulkanError(Str("failed to create descriptor set layout"));
         return (false);
     }
 
@@ -1010,7 +1016,7 @@ static b32 VulkanCreatePipelineLayout(void)
 
     if (vkCreatePipelineLayout(Vulkan.Device, &PipelineLayoutInfo, 0, &Vulkan.PipelineLayout))
     {
-        VulkanError("failed to create pipeline layout");
+        VulkanError(Str("failed to create pipeline layout"));
         return (false);
     }
 
@@ -1049,8 +1055,8 @@ static b32 VulkanCreatePipeline(void)
     VkShaderModule FragmentModule = {0};
     VkResult FragmentModuleResult = vkCreateShaderModule(Vulkan.Device, &FragmentModuleInfo, 0, &FragmentModule);
 
-    if (VertexModuleResult)     VulkanError("failed to create vertex shader module");
-    if (FragmentModuleResult)   VulkanError("failed to create fragment shader module");
+    if (VertexModuleResult)     VulkanError(Str("failed to create vertex shader module"));
+    if (FragmentModuleResult)   VulkanError(Str("failed to create fragment shader module"));
 
     if (VertexModuleResult || FragmentModuleResult)
     {
@@ -1210,7 +1216,7 @@ static b32 VulkanCreatePipeline(void)
 
     if (vkCreateGraphicsPipelines(Vulkan.Device, 0, 1, &PipelineInfo, 0, &Vulkan.Pipeline))
     {
-        VulkanError("failed to create graphics pipeline");
+        VulkanError(Str("failed to create graphics pipeline"));
         return (false);
     }
 
@@ -1235,7 +1241,7 @@ static b32 VulkanCreateSamplers(void)
 
     if (vkCreateSampler(Vulkan.Device, &DefaultSamplerInfo, 0, &Vulkan.DefaultSampler))
     {
-        VulkanError("failed to create default sampler");
+        VulkanError(Str("failed to create default sampler"));
         return (false);
     }
 
@@ -1255,7 +1261,7 @@ static b32 VulkanPickSwapchainFormat(void)
         SurfaceFormats
     ))
     {
-        VulkanError("failed to get physical device surface formats");
+        VulkanError(Str("failed to get physical device surface formats"));
         return (false);
     }
 
@@ -1273,7 +1279,7 @@ static b32 VulkanPickSwapchainFormat(void)
 
     if (Vulkan.SwapchainFormat.format == VK_FORMAT_UNDEFINED)
     {
-        VulkanError("unable to pick a suitable swapchain format");
+        VulkanError(Str("unable to pick a suitable swapchain format"));
         return (false);
     }
 
@@ -1361,7 +1367,7 @@ static b32 VulkanCreateBuffer(
 
     if (vkCreateBuffer(Vulkan.Device, &BufferInfo, 0, &Buffer->Buffer))
     {
-        VulkanError("failed to create buffer");
+        VulkanError(Str("failed to create buffer"));
         return (false);
     }
 
@@ -1375,7 +1381,7 @@ static b32 VulkanCreateBuffer(
 
     if (MemoryTypeIndex == U32Max)
     {
-        VulkanError("failed to select suitable memory type for buffer");
+        VulkanError(Str("failed to select suitable memory type for buffer"));
         return (false);
     }
 
@@ -1388,13 +1394,13 @@ static b32 VulkanCreateBuffer(
 
     if (vkAllocateMemory(Vulkan.Device, &AllocateInfo, 0, &Buffer->Memory))
     {
-        VulkanError("failed to allocate memory for buffer");
+        VulkanError(Str("failed to allocate memory for buffer"));
         return (false);
     }
 
     if (vkBindBufferMemory(Vulkan.Device, Buffer->Buffer, Buffer->Memory, 0))
     {
-        VulkanError("failed to bind memory to buffer");
+        VulkanError(Str("failed to bind memory to buffer"));
         return (false);
     }
 
@@ -1402,7 +1408,7 @@ static b32 VulkanCreateBuffer(
     {
         if (vkMapMemory(Vulkan.Device, Buffer->Memory, 0, Buffer->Size, 0, &Buffer->Mapping))
         {
-            VulkanError("failed to map buffer memory");
+            VulkanError(Str("failed to map buffer memory"));
             return (false);
         }
     }
@@ -1431,7 +1437,7 @@ static b32 VulkanCreateTexture(
     {
         default:
         {
-            VulkanError("unknown pixel kind in VulkanCreateTexture().");
+            VulkanError(Str("unknown pixel kind in VulkanCreateTexture()."));
             return (false);
         } break;
 
@@ -1460,7 +1466,7 @@ static b32 VulkanCreateTexture(
 
     if (vkCreateImage(Vulkan.Device, &ImageInfo, 0, &Texture->Image))
     {
-        VulkanError("failed to create image for texture");
+        VulkanError(Str("failed to create image for texture"));
         return (false);
     }
 
@@ -1474,7 +1480,7 @@ static b32 VulkanCreateTexture(
 
     if (MemoryTypeIndex == U32Max)
     {
-        VulkanError("failed to select suitable memory type for buffer");
+        VulkanError(Str("failed to select suitable memory type for buffer"));
         return (false);
     }
 
@@ -1487,13 +1493,13 @@ static b32 VulkanCreateTexture(
 
     if (vkAllocateMemory(Vulkan.Device, &AllocateInfo, 0, &Texture->Memory))
     {
-        VulkanError("failed to allocate memory for buffer");
+        VulkanError(Str("failed to allocate memory for buffer"));
         return (false);
     }
 
     if (vkBindImageMemory(Vulkan.Device, Texture->Image, Texture->Memory, 0))
     {
-        VulkanError("failed to bind memory to texture image");
+        VulkanError(Str("failed to bind memory to texture image"));
         return (false);
     }
 
@@ -1528,7 +1534,7 @@ static b32 VulkanCreateTexture(
 
     if (vkCreateImageView(Vulkan.Device, &ImageViewInfo, 0, &Texture->ImageView))
     {
-        VulkanError("failed to create image view for texture");
+        VulkanError(Str("failed to create image view for texture"));
         return (false);
     }
 
@@ -1542,7 +1548,7 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
     switch (Texture->Format)
     {
         default:
-            VulkanError("unknown format in VulkanUploadTexture()");
+            VulkanError(Str("unknown format in VulkanUploadTexture()"));
             return (false);
 
         case VK_FORMAT_R8_UNORM:        BytesPerPixel = 1; break;
@@ -1553,7 +1559,7 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
 
     if (Vulkan.TransferBuffer.Size < UploadSize)
     {
-        VulkanError("transfer buffer is not large enough to upload texture");
+        VulkanError(Str("transfer buffer is not large enough to upload texture"));
         return (false);
     }
 
@@ -1561,7 +1567,7 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {
-        VulkanError("failed to wait until device idle before uploading texture");
+        VulkanError(Str("failed to wait until device idle before uploading texture"));
         return (false);
     }
 
@@ -1573,13 +1579,13 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
 
     if (vkResetCommandBuffer(Vulkan.CommandBuffer, 0))
     {
-        VulkanError("failed to reset command buffer");
+        VulkanError(Str("failed to reset command buffer"));
         return (false);
     }
 
     if (vkBeginCommandBuffer(Vulkan.CommandBuffer, &BeginInfo))
     {
-        VulkanError("failed to begin command buffer");
+        VulkanError(Str("failed to begin command buffer"));
         return (false);
     }
 
@@ -1663,7 +1669,7 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
 
     if (vkEndCommandBuffer(Vulkan.CommandBuffer))
     {
-        VulkanError("failed to end command buffer");
+        VulkanError(Str("failed to end command buffer"));
         return (false);
     }
 
@@ -1676,13 +1682,13 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
 
     if (vkQueueSubmit(Vulkan.Queue, 1, &SubmitInfo, 0))
     {
-        VulkanError("failed to submit command buffer for uploading texture");
+        VulkanError(Str("failed to submit command buffer for uploading texture"));
         return (false);
     }
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {
-        VulkanError("failed to wait until device idle after uploading texture");
+        VulkanError(Str("failed to wait until device idle after uploading texture"));
         return (false);
     }
 

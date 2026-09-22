@@ -1,4 +1,7 @@
 
+// NOTE(vak): GFX/Input backend implementation using the 
+// Wayland protocol
+
 #pragma once
 
 // NOTE(vak): Cheatsheet
@@ -15,6 +18,10 @@ static void WaylandPollEvents       (void);
 static void WaylandPresent          (void);
 
 // NOTE(vak): Implementation
+
+// TODO(vak): Stop relying on libwayland and write our own
+// functions that sends, receives and processes Wayland
+// protocol messages.
 
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
@@ -131,10 +138,11 @@ static void WaylandPresent(void)
     wl_surface_commit(Wayland.Surface);
 }
 
-static void WaylandError(char* Message)
+static void WaylandError(string Message)
 {
-    // TODO(vak): Implement this using write()
-    //fprintf(stderr, "[wayland]: %s\n", Message);
+    PrintErr(Str("[wayland]: "));
+    PrintErr(Message);
+    PrintErr(Str("\n"));
 }
 
 // NOTE(vak): Pointer & Keyboard
@@ -198,14 +206,14 @@ static void WaylandKeyboardKeymap(
 {
     if (Format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
     {
-        WaylandError("unknown keyboard keymap");
+        WaylandError(Str("unknown keyboard keymap"));
         return;
     }
 
     char* KeymapString = mmap(0, Size, PROT_READ, MAP_PRIVATE, FileDescriptor, 0);
     if (!KeymapString)
     {
-        WaylandError("failed to mmap keymap");
+        WaylandError(Str("failed to mmap keymap"));
         return;
     }
 
@@ -214,7 +222,7 @@ static void WaylandKeyboardKeymap(
     Wayland.XkbContext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (!Wayland.XkbContext)
     {
-        WaylandError("failed to create xkb context");
+        WaylandError(Str("failed to create xkb context"));
         return;
     }
 
@@ -227,7 +235,7 @@ static void WaylandKeyboardKeymap(
 
     if (!Wayland.XkbKeymap)
     {
-        WaylandError("failed to create xkb keymap");
+        WaylandError(Str("failed to create xkb keymap"));
         return;
     }
 
@@ -235,7 +243,7 @@ static void WaylandKeyboardKeymap(
 
     if (!Wayland.XkbState)
     {
-        WaylandError("failed to create xkb state");
+        WaylandError(Str("failed to create xkb state"));
         return;
     }
 
@@ -350,7 +358,7 @@ static void WaylandSeatCapabilities(
         if (Wayland.Pointer)
             wl_pointer_add_listener(Wayland.Pointer, &WaylandPointerListener, 0);
         else
-            WaylandError("failed to get wl_pointer from wl_seat");
+            WaylandError(Str("failed to get wl_pointer from wl_seat"));
     }
 
     if (Capabilities & WL_SEAT_CAPABILITY_KEYBOARD)
@@ -360,7 +368,7 @@ static void WaylandSeatCapabilities(
         if (Wayland.Keyboard)
             wl_keyboard_add_listener(Wayland.Keyboard, &WaylandKeyboardListener, 0);
         else
-            WaylandError("failed to get wl_keyboard from wl_seat");
+            WaylandError(Str("failed to get wl_keyboard from wl_seat"));
     }
 }
 
@@ -470,7 +478,7 @@ static b32 WaylandConnectDisplay(void)
     Wayland.Display = wl_display_connect(0);
     if (!Wayland.Display)
     {
-        WaylandError("failed to connect to display");
+        WaylandError(Str("failed to connect to display"));
         return (false);
     }
 
@@ -482,7 +490,7 @@ static b32 WaylandGetRegistry(void)
     Wayland.Registry = wl_display_get_registry(Wayland.Display);
     if (!Wayland.Registry)
     {
-        WaylandError("failed to get wl_registry");
+        WaylandError(Str("failed to get wl_registry"));
         return (false);
     }
 
@@ -495,10 +503,10 @@ static b32 WaylandGetRegistry(void)
         (Wayland.Seat          == 0) ||
         (Wayland.Output        == 0);
 
-    if (!Wayland.Compositor)   WaylandError("failed to register wl_compositor");
-    if (!Wayland.XdgWmBase)    WaylandError("failed to register xdg_wm_base");
-    if (!Wayland.Seat)         WaylandError("failed to register wl_seat");
-    if (!Wayland.Output)       WaylandError("failed to register wl_output");
+    if (!Wayland.Compositor)   WaylandError(Str("failed to register wl_compositor"));
+    if (!Wayland.XdgWmBase)    WaylandError(Str("failed to register xdg_wm_base"));
+    if (!Wayland.Seat)         WaylandError(Str("failed to register wl_seat"));
+    if (!Wayland.Output)       WaylandError(Str("failed to register wl_output"));
 
     b32 Okay = !NotOkay;
 
@@ -510,7 +518,7 @@ static b32 WaylandCreateSurface(void)
     Wayland.Surface = wl_compositor_create_surface(Wayland.Compositor);
     if (!Wayland.Surface)
     {
-        WaylandError("failed to create wl_surface");
+        WaylandError(Str("failed to create wl_surface"));
         return (false);
     }
 
@@ -522,7 +530,7 @@ static b32 WaylandGetXdgSurface(void)
     Wayland.XdgSurface = xdg_wm_base_get_xdg_surface(Wayland.XdgWmBase, Wayland.Surface);
     if (!Wayland.XdgSurface)
     {
-        WaylandError("failed to get xdg_surface from xdg_wm_base");
+        WaylandError(Str("failed to get xdg_surface from xdg_wm_base"));
         return (false);
     }
 
@@ -536,7 +544,7 @@ static b32 WaylandGetXdgTopLevel(void)
     Wayland.XdgTopLevel = xdg_surface_get_toplevel(Wayland.XdgSurface);
     if (!Wayland.XdgTopLevel)
     {
-        WaylandError("failed to get xdg_toplevel from xdg_surface");
+        WaylandError(Str("failed to get xdg_toplevel from xdg_surface"));
         return (false);
     }
 

@@ -1,5 +1,6 @@
 
 #include "shared.c"
+#include "platform.c"
 #include "intrinsics.c"
 #include "random.c"
 #include "math.c"
@@ -7,8 +8,9 @@
 #include "render.c"
 #include "game.c"
 
-// NOTE(vak): This syscall implementation only works for x86_64 right now
+// NOTE(vak): Linux syscall implementation
 
+#define __NR_write          (1)
 #define __NR_close          (3)
 #define __NR_mmap           (9)
 #define __NR_munmap         (11)
@@ -39,6 +41,11 @@ static ssize LinuxSyscall(usize NR, usize A, usize B, usize C, usize D, usize E,
     return (Result);
 }
 
+// NOTE(vak): Definitions for syscalls
+
+#define STDOUT_FILENO (1)
+#define STDERR_FILENO (2)
+
 #define PROT_NONE   (0x00)
 #define PROT_READ   (0x01)
 #define PROT_WRITE  (0x02)
@@ -53,11 +60,20 @@ struct timespec
     s64 tv_nsec;
 };
 
-#define close(fd) (int)LinuxSyscall(__NR_close, fd, 0, 0, 0, 0, 0)
-#define mmap(addr, length, prot, flags, fd, offset) (void*)LinuxSyscall(__NR_mmap, (usize)(addr), length, prot, flags, fd, offset)
-#define munmap(addr, length) (int)LinuxSyscall(__NR_munmap, (usize)(addr), length, 0, 0, 0, 0)
-#define nanosleep(duration, rem) (int)LinuxSyscall(__NR_nanosleep, (usize)(duration), (usize)(rem), 0, 0, 0, 0)
-#define clock_gettime(clockid, res) (int)LinuxSyscall(__NR_clock_gettime, clockid, (usize)(res), 0, 0, 0, 0)
+// NOTE(vak): Macros for syscalls
+
+#define write(fd, buf, count)                       (ssize) LinuxSyscall(__NR_write, fd, (usize)(buf), count, 0, 0, 0)
+#define close(fd)                                   (int)   LinuxSyscall(__NR_close, fd, 0, 0, 0, 0, 0)
+#define mmap(addr, length, prot, flags, fd, offset) (void*) LinuxSyscall(__NR_mmap, (usize)(addr), length, prot, flags, fd, offset)
+#define munmap(addr, length)                        (int)   LinuxSyscall(__NR_munmap, (usize)(addr), length, 0, 0, 0, 0)
+#define nanosleep(duration, rem)                    (int)   LinuxSyscall(__NR_nanosleep, (usize)(duration), (usize)(rem), 0, 0, 0, 0)
+#define clock_gettime(clockid, res)                 (int)   LinuxSyscall(__NR_clock_gettime, clockid, (usize)(res), 0, 0, 0, 0)
+
+// NOTE(vak): Platform code
+
+#include "linux_platform.c"
+
+// NOTE(vak): Main code
 
 #include "wayland.c"
 
@@ -67,9 +83,17 @@ struct timespec
 __attribute__((naked))
 void start(void)
 {
+    // NOTE(vak): Translation of the assembly below to C:
+    //      int     ArgCount    = *(int*)(StackPointer + 0);
+    //      char*   Args        = (char*)StackPointer + 8;
+    //      char*   Envp        = (char*)StackPointer + 8 + 8*ArgCount;
+    //      int     ReturnCode  = main(ArgCount, Args, Envp);
+    //      exit_group(ReturnCode);
+
     __asm__ volatile (
-        "mov 0(%rsp), %edi\n"
-        "lea 8(%rsp), %rsi\n"
+        "mov 0(%rsp),           %edi\n"
+        "lea 8(%rsp),           %rsi\n"
+        "lea 8(%rsp, %rdi, 8),  %rdx\n"
         "call main\n"
 
         "mov %eax, %edi\n"
@@ -78,8 +102,47 @@ void start(void)
     );
 }
 
-s32 main(s32 ArgCount, char* Args[])
+static string LinuxGetEnv(char* Envp[], string VariableName)
 {
+    string VariableAndValue = NilString;
+
+    for (usize Index = 0; Envp[Index] != 0; Index++)
+    {
+        string Candidate = CString(Envp[Index]);
+
+        if (StringStartsWith(Candidate, VariableName))
+        {
+            VariableAndValue = Candidate;
+            break;
+        }
+    }
+
+    if (IsNilString(VariableAndValue))
+        return (NilString);
+
+    usize From = Minimum(VariableName.Size + 1, VariableAndValue.Size);
+    usize Size = VariableAndValue.Size - From;
+
+    string Value = StringView(VariableAndValue, From, Size);
+    return (Value);
+}
+
+static void LinuxGetSoundSamples(s16* SampleBuffer, usize SampleCount, usize SampleRate, usize ChannelCount)
+{
+    usize BytesPerSample = sizeof(s16) * ChannelCount;
+    memset(SampleBuffer, 0, BytesPerSample * SampleCount);
+}
+
+s32 main(s32 ArgCount, char* Args[], char* Envp[])
+{
+    string XdgSessionType = LinuxGetEnv(Envp, Str("XDG_SESSION_TYPE"));
+
+    if (!StringEqual(XdgSessionType, Str("wayland")))
+    {
+        PrintErr(Str("error: Sorry, only wayland is supported right now!"));
+        return (1);
+    }
+
     if (!WaylandSetup())
     {
         WaylandShutdown();
