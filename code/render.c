@@ -32,6 +32,7 @@ static void         RenderRectTextured      (rect2 Rect, v4 Color, rect2 RectUV,
 
 // NOTE(vak): Text renderer expects window coordinates, and (0, 0) at top-left.
 static v2           RenderText              (string Text, v2 Position, v4 Color); 
+static v2           RenderTextCentered      (string Text, v2 Position, v4 Color); 
 static v2           RenderGetTextSize       (string Text);
 static f32          RenderGetTextSizeX      (string Text);
 static f32          RenderGetTextSizeY      (string Text);
@@ -58,7 +59,7 @@ static void RenderPrepareForFrame(void)
 {
     Render.RectCount        = 0;
     Render.TextScale        = 2.0f;
-    Render.LineHeightScale  = 1.25f;
+    Render.LineHeightScale  = 1.4f;
     Render.FontCellWidth    = 7.0f;
     Render.FontCellHeight   = 9.0f;
 }
@@ -144,6 +145,12 @@ static v2 RenderText(string Text, v2 Position, v4 Color)
     }
 
     return (CursorP);
+}
+
+static v2 RenderTextCentered(string Text, v2 Position, v4 Color)
+{
+    Position.X -= 0.5f*RenderGetTextSizeX(Text);
+    return RenderText(Text, Position, Color);
 }
 
 static v2 RenderGetTextSize(string Text)
