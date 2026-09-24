@@ -9,7 +9,16 @@ typedef enum
     InputButton_MoveRight,
     InputButton_MoveUp,
     InputButton_MoveDown,
+
     InputButton_Shoot,
+
+    InputButton_Weapon1,
+    InputButton_Weapon2,
+    InputButton_Weapon3,
+
+    InputButton_Prev,
+    InputButton_Next,
+    InputButton_Buy,
 
     InputButton_COUNT,
 } input_button;

@@ -145,6 +145,16 @@ static v2 R2GetSize(rect2 Rect)
     return (Result);
 }
 
+static rect2 R2Expand(rect2 Rect, v2 Apron)
+{
+    rect2 Expanded = R2MinMax(
+        V2Sub(Rect.Min, Apron),
+        V2Add(Rect.Max, Apron)
+    );
+
+    return (Expanded);
+}
+
 static b32 R2Intersects(rect2 A, rect2 B)
 {
     b32 IsOutside =

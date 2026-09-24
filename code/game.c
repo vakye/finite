@@ -1,4 +1,6 @@
 
+#include <stdio.h>
+
 #pragma once
 
 // NOTE(vak): Cheatsheet
@@ -8,860 +10,649 @@ static void GameUpdateAndRender (f32 DeltaTime, u32 Width, u32 Height);
 
 // NOTE(vak): Implementation
 
-#if 1
-
-#define CollisionMaskFlag_Player        (1ull << 0)
-#define CollisionMaskFlag_Enemy         (1ull << 1)
-#define CollisionMaskFlag_All           (U64Max)
+typedef enum
+{
+    ShotKind_Single = 0,
+    ShotKind_Triple,
+} shot_kind;
 
 typedef struct
 {
-    u32             Stage;      // NOTE(vak): Current stage
-    random_state    Entropy;    // NOTE(vak): Random number generator state
-    rect2           ViewRect;   // NOTE(vak): Camera view rectangle
-    entity_id       PlayerID;   // NOTE(vak): Entity ID of the player
-    u32             EnemyCount; // NOTE(vak): Remaining enemies still alive
-    f32             DeltaTime;  // NOTE(vak): This frame's delta time
-} game_state;
-
-static game_state Game = {0};
-
-static weapon GameWeaponRandomCooldown(weapon_kind Kind)
-{
-    weapon_stats* Stats = GetWeaponStats(Kind);
-
-    f32 MaxCooldown = SafeDivide0(1.0f, Stats->FireRate);
-
-    weapon Result = {.Kind = Kind, .Cooldown = MaxCooldown * RandomUnilateral(&Game.Entropy)};
-    return (Result);
-}
-
-static v2 GameRandomEnemySpawnP(void)
-{
-    v2 Result = V2(
-        0.0f  + 7.0f * RandomBilateral(&Game.Entropy),
-        16.0f + 2.0f * RandomBilateral(&Game.Entropy)
-    );
-
-    return (Result);
-}
-
-static v2 GameRandomEnemyRestP(void)
-{
-    v2 Result = V2(
-        0.0f  + 7.0f * RandomBilateral (&Game.Entropy),
-        4.0f  + 4.0f * RandomUnilateral(&Game.Entropy)
-    );
-
-    return (Result);
-}
-
-static void GameSpawnEnemyGrunt(void)
-{
-    entity_id       EntityID    = AddEntity(EntityKind_EnemyGrunt);
-    entity*         Entity      = GetEntity(EntityID);
-    body*           Body        = GetBody(Entity->BodyID);
-    enemy_grunt*    Grunt       = &Entity->Grunt;
-
-    // NOTE(vak): Grunt
-    //      + Health:       Medium
-    //      + Speed:        None
-    //      + Fire rate:    Medium
-    //      + Damage:       Medium
-
-    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
-
-    Entity->Color           = V4(0.3f, 0.4f, 0.9f, 1.0f);
-    Grunt->MaxHealth        = 120.0f;
-    Grunt->Weapon           = GameWeaponRandomCooldown(WeaponKind_GruntPistol);
-
-    Body->Size              = V2(0.6f, 0.4f);
-    Body->CollisionMask     = CollisionMaskFlag_Enemy;
-    Grunt->CurrentHealth    = Grunt->MaxHealth;
-    Grunt->RestP            = GameRandomEnemyRestP();
-}
-
-static void GameSpawnEnemyMover(void)
-{
-    entity_id       EntityID    = AddEntity(EntityKind_EnemyMover);
-    entity*         Entity      = GetEntity(EntityID);
-    body*           Body        = GetBody(Entity->BodyID);
-    enemy_mover*    Mover       = &Entity->Mover;
-
-    // NOTE(vak): Mover
-    //      + Health:       Low
-    //      + Speed:        High
-    //      + Fire rate:    High
-    //      + Damage:       Low
-
-    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
-
-    Entity->Color           = V4(0.9f, 0.9f, 0.4f, 1.0f);
-    Mover->ShuffleCooldown  = 0.5f;
-    Mover->Weapon           = GameWeaponRandomCooldown(WeaponKind_MoverPistol);
-
-    Body->Size              = V2(0.4f, 0.4f);
-    Body->CollisionMask     = CollisionMaskFlag_Enemy;
-    Mover->CurrentHealth    = Mover->MaxHealth;
-    Mover->ShuffleTimer     = Mover->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
-    Mover->RestP            = GameRandomEnemyRestP();
-}
-
-static void GameSpawnEnemyArmored(void)
-{
-    entity_id       EntityID    = AddEntity(EntityKind_EnemyArmored);
-    entity*         Entity      = GetEntity(EntityID);
-    body*           Body        = GetBody(Entity->BodyID);
-    enemy_armored*  Armored     = &Entity->Armored;
-
-    // NOTE(vak): Armored
-    //      + Health:       High
-    //      + Speed:        Low
-    //      + Fire rate:    Low
-    //      + Damage:       High
-
-    SetBodyP(Entity->BodyID, GameRandomEnemySpawnP());
-
-    Entity->Color               = V4(0.5f, 0.5f, 0.5f, 1.0f);
-    Armored->ShuffleCooldown    = 5.3f;
-    Armored->MaxHealth          = 300.0f;
-    Armored->Weapon             = GameWeaponRandomCooldown(WeaponKind_ArmoredRevolver);
-
-    Body->Size                  = V2(0.8f, 0.8f);
-    Body->CollisionMask     = CollisionMaskFlag_Enemy;
-    Armored->CurrentHealth      = Armored->MaxHealth;
-    Armored->ShuffleTimer       = Armored->ShuffleCooldown * RandomUnilateral(&Game.Entropy);
-    Armored->RestP              = GameRandomEnemyRestP();
-}
-
-static entity_id GameSpawnPlayer(void)
-{
-    entity_id       EntityID    = AddEntity(EntityKind_Player);
-    entity*         Entity      = GetEntity(EntityID);
-    body*           Body        = GetBody(Entity->BodyID);
-    player*         Player      = &Entity->Player;
-
-    SetBodyP(Entity->BodyID, V2(0.0f, -6.5f));
-
-    Entity->Color           = V4(1.0f, 0.8f, 0.5f, 1.0f);
-    Body->Size              = V2(0.45f, 0.45f);
-    Body->CollisionMask     = CollisionMaskFlag_Player;
-    Player->MaxHealth       = 200.0f;
-    Player->CurrentHealth   = Player->MaxHealth;
-    Player->Weapon          = (weapon){.Kind = WeaponKind_PlayerPewPew};
-
-    return (EntityID);
-}
-
-static void GameStartNewStage(void)
-{
-    Game.Stage++;
-
-    u32 MaxGruntCount   = 20;
-    u32 MaxMoverCount   = 10;
-    u32 MaxArmoredCount = 5;
-
-    u32 GruntCount      = 10 + (Game.Stage - 1);
-    u32 MoverCount      = 0;
-    u32 ArmoredCount    = 0;
-
-    if (Game.Stage >= 2)
-        MoverCount = 1 + (Game.Stage - 2);
-
-    if (Game.Stage >= 3)
-        ArmoredCount = 1 + (Game.Stage - 3);
-
-    GruntCount      = Minimum(GruntCount,   MaxGruntCount);
-    MoverCount      = Minimum(MoverCount,   MaxMoverCount);
-    ArmoredCount    = Minimum(ArmoredCount, MaxArmoredCount);
-
-    for (u32 Index = 0; Index < GruntCount; Index++)
-        GameSpawnEnemyGrunt();
-
-    for (u32 Index = 0; Index < MoverCount; Index++)
-        GameSpawnEnemyMover();
-
-    for (u32 Index = 0; Index < ArmoredCount; Index++)
-        GameSpawnEnemyArmored();
-
-    Game.EnemyCount = GruntCount + MoverCount + ArmoredCount;
-}
-
-static void GameRestart(void)
-{
-    RemoveAllEntities();
-    memset(&Game, 0, sizeof(game_state));
-
-    Game.PlayerID = GameSpawnPlayer();
-    GameStartNewStage();
-}
-
-static void GameUpdateWeapon(weapon* Weapon)
-{
-    Weapon->Cooldown -= Game.DeltaTime;
-    Weapon->Cooldown = Maximum(0.0f, Weapon->Cooldown);
-}
-
-static void GameWeaponTryShoot(weapon* Weapon, v2 P, v2 Direction, u64 CollisionMask)
-{
-    if (Weapon->Cooldown > 0.0f)
-        return;
-
-    weapon_stats* Stats = GetWeaponStats(Weapon->Kind);
-
-    entity_id BulletID = AddEntity(EntityKind_Bullet);
-    entity* BulletEntity = GetEntity(BulletID);
-    body* BulletBody = GetBody(BulletEntity->BodyID);
-    bullet* Bullet = &BulletEntity->Bullet;
-
-    BulletEntity->Color = Stats->BulletColor;
-    BulletBody->P = P;
-    BulletBody->DP = V2MulScalar(Direction, Stats->BulletSpeed);
-    BulletBody->DDP = V2MulScalar(Direction, Stats->BulletAccel);
-    BulletBody->Size = Stats->BulletSize;
-    BulletBody->CollisionMask = CollisionMask;
-    Bullet->Damage = Stats->BulletDamage;
-
-    u32 FireParticleCount = 4;
-    for (usize Index = 0; Index < FireParticleCount; Index++)
-    {
-        entity_id ParticleID = AddEntity(EntityKind_Particle);
-        entity* ParticleEntity = GetEntity(ParticleID);
-        body* ParticleBody = GetBody(ParticleEntity->BodyID);
-        particle* Particle = &ParticleEntity->Particle;
-
-        v2 Jitter = V2(
-            0.5f * RandomBilateral(&Game.Entropy),
-            0.5f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 ParticleDirection = V2NormalizeOrZero(V2Add(Jitter, Direction));
-
-        ParticleBody->P = BulletBody->P;
-        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->DDP = V2MulScalar(ParticleDirection, 3.0f + 3.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->Size = V2(0.05f + 0.1f*RandomUnilateral(&Game.Entropy), 0.05f + 0.1f*RandomUnilateral(&Game.Entropy));
-
-        Particle->BaseColor = V4(1.0f, 0.9f, 0.6f, 0.9f);
-        Particle->Lifetime = 0.1f + 0.2f*RandomUnilateral(&Game.Entropy);
-        Particle->TimeRemaining = Particle->Lifetime;
-    }
-
-    u32 SmokeParticleCount = 8;
-    for (usize Index = 0; Index < SmokeParticleCount; Index++)
-    {
-        entity_id ParticleID = AddEntity(EntityKind_Particle);
-        entity* ParticleEntity = GetEntity(ParticleID);
-        body* ParticleBody = GetBody(ParticleEntity->BodyID);
-        particle* Particle = &ParticleEntity->Particle;
-
-        v2 Jitter = V2(
-            0.5f * RandomBilateral(&Game.Entropy),
-            0.5f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 ParticleDirection = V2NormalizeOrZero(V2Add(Jitter, Direction));
-
-        ParticleBody->P = BulletBody->P;
-        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->DDP = V2MulScalar(ParticleDirection, 4.0f + 3.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->Size = V2(0.1f + 0.05f*RandomUnilateral(&Game.Entropy), 0.1f + 0.05f*RandomUnilateral(&Game.Entropy));
-
-        Particle->BaseColor = V4(0.4f, 0.4f, 0.4f, 0.7f);
-        Particle->Lifetime = 0.2f + 0.2f*RandomUnilateral(&Game.Entropy);
-        Particle->TimeRemaining = Particle->Lifetime;
-    }
-
-    Weapon->Cooldown = SafeDivide0(1.0f, Stats->FireRate);
-}
-
-static void GamePlayerTryShoot(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    player* Player = &Entity->Player;
-
-    v2 Direction = V2(0, 1);
-    v2 BulletP = V2Add(Body->P, V2(0.0f, Body->Size.Y));
-
-    GameWeaponTryShoot(&Player->Weapon, BulletP, Direction, CollisionMaskFlag_Enemy);
-}
-
-static void GamePlayerUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    player* Player = &Entity->Player;
-
-    GameUpdateWeapon(&Player->Weapon);
-
-    if (InputIsButtonDown(InputButton_Shoot))
-        GamePlayerTryShoot(EntityID);
-
-    v2  MoveDirection = V2(0.0f, 0.0f);
-
-    if (InputIsButtonDown(InputButton_MoveLeft))    MoveDirection.X -= 1.0f;
-    if (InputIsButtonDown(InputButton_MoveRight))   MoveDirection.X += 1.0f;
-    if (InputIsButtonDown(InputButton_MoveDown))    MoveDirection.Y -= 1.0f;
-    if (InputIsButtonDown(InputButton_MoveUp))      MoveDirection.Y += 1.0f;
-
-    MoveDirection = V2NormalizeOrZero(MoveDirection);
-
-    f32 MoveFriction    = 35.0f;
-    f32 MoveForce       = 250.0f;
-
-    v2 Force = V2Sub(
-        V2ScalarMul(MoveForce,      MoveDirection),
-        V2ScalarMul(MoveFriction,   Body->DP)
-    );
-
-    SetForce(Entity->BodyID, Force);
-}
-
-static void GameBulletUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-
-    rect2 BulletRect = R2CenterSize(Body->P, Body->Size);
-
-    if (!R2Intersects(Game.ViewRect, BulletRect))
-        RemoveEntity(EntityID);
-
-    u32 TrailParticleCount = 1;
-    for (usize Index = 0; Index < TrailParticleCount; Index++)
-    {
-        entity_id ParticleID = AddEntity(EntityKind_Particle);
-        entity* ParticleEntity = GetEntity(ParticleID);
-        body* ParticleBody = GetBody(ParticleEntity->BodyID);
-        particle* Particle = &ParticleEntity->Particle;
-
-        v2 Jitter = V2(
-            0.2f * RandomBilateral(&Game.Entropy),
-            0.2f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 ParticleDirection = V2NormalizeOrZero(V2Sub(Jitter, V2NormalizeOrZero(Body->DP)));
-
-        ParticleBody->P = Body->P;
-        ParticleBody->DP = V2MulScalar(ParticleDirection, 2.0f + 2.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->DDP = V2MulScalar(ParticleDirection, 3.0f + 3.0f*RandomUnilateral(&Game.Entropy));
-        ParticleBody->Size = V2(0.05f + 0.05f*RandomUnilateral(&Game.Entropy), 0.05f + 0.05f*RandomUnilateral(&Game.Entropy));
-
-        Particle->BaseColor = Entity->Color;
-        Particle->Lifetime = 0.02f + 0.02f*RandomUnilateral(&Game.Entropy);
-        Particle->TimeRemaining = Particle->Lifetime;
-    }
-}
-
-static void GameParticleUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    particle* Particle = &Entity->Particle;
-
-    Particle->TimeRemaining -= Game.DeltaTime;
-
-    if (Particle->TimeRemaining <= 0.0f)
-    {
-        RemoveEntity(EntityID);
-        return;
-    }
-
-    f32 T = Particle->TimeRemaining / Particle->Lifetime;
-    v4 ColorScale = V4(1.0f, 1.0f, 1.0f, T);
-
-    Entity->Color = V4Mul(Particle->BaseColor, ColorScale);
-}
-
-static v2 GameComputeEnemyMoveForce(v2 RestP, v2 CurrentP, v2 CurrentDP)
-{
-    // NOTE(vak): Proportional derivative controller to move the enemy
-    // from 'CurrentP' to 'RestP' in a smooth manner.
-
-    // NOTE(vak): Basically a mass-spring damper model
-
-    v2 MoveDirection = V2NormalizeOrZero(V2Sub(RestP, CurrentP));
-    f32 MoveFriction = 2.0f;
-    f32 MoveForce = 10.0f;
-
-    v2 JitterDirection = V2NormalizeOrZero(V2(
-        RandomBilateral(&Game.Entropy),
-        RandomBilateral(&Game.Entropy)
-    ));
-
-    f32 JitterStrength = 25.0f;
-
-    v2 Force = V2Zero();
-
-    Force = V2Add(Force, V2Sub(
-        V2ScalarMul(MoveForce, MoveDirection),
-        V2ScalarMul(MoveFriction, CurrentDP)
-    ));
-
-    Force = V2Add(Force, V2ScalarMul(JitterStrength, JitterDirection));
-
-    return (Force);
-}
-
-static void GameEnemyTryShoot(weapon* Weapon, body* Body)
-{
-    v2 P = V2Add(Body->P, V2(0, -Body->Size.Y));
-    v2 Direction = V2(0, -1);
-
-    GameWeaponTryShoot(Weapon, P, Direction, CollisionMaskFlag_Player);
-}
-
-static void GameEnemyGruntUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    enemy_grunt* Grunt = &Entity->Grunt;
-
-    GameUpdateWeapon(&Grunt->Weapon);
-    GameEnemyTryShoot(&Grunt->Weapon, Body);
-
-    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Grunt->RestP, Body->P, Body->DP));
-}
-
-static void GameEnemyMoverUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    enemy_mover* Mover = &Entity->Mover;
-
-    GameUpdateWeapon(&Mover->Weapon);
-    GameEnemyTryShoot(&Mover->Weapon, Body);
-
-    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Mover->RestP, Body->P, Body->DP));
-
-    Mover->ShuffleTimer -= Game.DeltaTime;
-    if (Mover->ShuffleTimer <= 0.0f)
-    {
-        entity* PlayerEntity = GetEntity(Game.PlayerID);
-        body* PlayerBody = GetBody(PlayerEntity->BodyID);
-
-        Mover->RestP = V2(
-            PlayerBody->P.X + 5.0f * RandomBilateral (&Game.Entropy),
-            4.0f            + 4.0f * RandomUnilateral(&Game.Entropy)
-        );
-
-        Mover->ShuffleTimer = Mover->ShuffleCooldown;
-    }
-}
-
-static void GameEnemyArmoredUpdate(entity_id EntityID)
-{
-    entity* Entity = GetEntity(EntityID);
-    body* Body = GetBody(Entity->BodyID);
-    enemy_armored* Armored = &Entity->Armored;
-
-    GameUpdateWeapon(&Armored->Weapon);
-    GameEnemyTryShoot(&Armored->Weapon, Body);
-
-    SetForce(Entity->BodyID, GameComputeEnemyMoveForce(Armored->RestP, Body->P, Body->DP));
-
-    Armored->ShuffleTimer -= Game.DeltaTime;
-    if (Armored->ShuffleTimer <= 0.0f)
-    {
-        Armored->RestP = V2(
-            0.0f + 8.0f * RandomBilateral (&Game.Entropy),
-            4.0f + 4.0f * RandomUnilateral(&Game.Entropy)
-        );
-
-        Armored->ShuffleTimer = Armored->ShuffleCooldown;
-    }
-}
-
-static void GameHandleCollision(body_id ThisBodyID, body_id OtherBodyID)
-{
-    entity_id ThisEntityID = GetEntityFromBody(ThisBodyID);
-    entity_id OtherEntityID = GetEntityFromBody(OtherBodyID);
-
-    printf("%u, %u\n", ThisEntityID, OtherEntityID);
-
-    entity* ThisEntity = GetEntity(ThisEntityID);
-    entity* OtherEntity = GetEntity(OtherEntityID);
-
-    entity_id PlayerEntityID    = NilEntityID;
-    entity_id EnemyEntityID     = NilEntityID;
-    entity_id BulletEntityID    = NilEntityID;
-
-    switch (ThisEntity->Kind)
-    {
-        case EntityKind_Player:         PlayerEntityID  = ThisEntityID; break;
-        case EntityKind_EnemyGrunt:     EnemyEntityID   = ThisEntityID; break;
-        case EntityKind_EnemyMover:     EnemyEntityID   = ThisEntityID; break;
-        case EntityKind_EnemyArmored:   EnemyEntityID   = ThisEntityID; break;
-        case EntityKind_Bullet:         BulletEntityID  = ThisEntityID; break;
-    }
-
-    switch (OtherEntity->Kind)
-    {
-        case EntityKind_Player:         PlayerEntityID  = OtherEntityID; break;
-        case EntityKind_EnemyGrunt:     EnemyEntityID   = OtherEntityID; break;
-        case EntityKind_EnemyMover:     EnemyEntityID   = OtherEntityID; break;
-        case EntityKind_EnemyArmored:   EnemyEntityID   = OtherEntityID; break;
-        case EntityKind_Bullet:         BulletEntityID  = OtherEntityID; break;
-    }
-
-    if (EnemyEntityID && BulletEntityID)
-    {
-        RemoveEntity(BulletEntityID);
-    }
-
-    if (PlayerEntityID && BulletEntityID)
-    {
-        RemoveEntity(BulletEntityID);
-    }
-}
-
-static void GameSetup(usize RandomSeed)
-{
-    Game.Entropy.State = RandomSeed;
-
-    EquipEntityKindUpdate(EntityKind_Player,        GamePlayerUpdate);
-    EquipEntityKindUpdate(EntityKind_Bullet,        GameBulletUpdate);
-    EquipEntityKindUpdate(EntityKind_Particle,      GameParticleUpdate);
-    EquipEntityKindUpdate(EntityKind_EnemyGrunt,    GameEnemyGruntUpdate);
-    EquipEntityKindUpdate(EntityKind_EnemyMover,    GameEnemyMoverUpdate);
-    EquipEntityKindUpdate(EntityKind_EnemyArmored,  GameEnemyArmoredUpdate);
-
-    EquipCollisionHandler(GameHandleCollision);
-
-    GameRestart();
-}
-
-static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
-{
-    Game.DeltaTime = DeltaTime;
-
-    f32 AspectRatio = (f32)Width / (f32)Height;
-    f32 FocalLength = 0.05f;
-
-    v2 ViewCenter = V2(0.0f, 0.0f);
-    v2 ViewSize   = V2(
-        AspectRatio / FocalLength,
-        1.0f        / FocalLength
-    );
-
-    Game.ViewRect = R2CenterSize(ViewCenter, ViewSize);
-
-    RenderOrthographic2D(Game.ViewRect);
-
-    UpdateAllEntities();
-    IntegrateAllForces(DeltaTime);
-    HandleCollisions();
-    RenderAllEntities();
-}
-
-#else
-
-#define CollisionMaskFlag_Player        (1ull << 0)
-#define CollisionMaskFlag_Enemy         (1ull << 1)
-#define CollisionMaskFlag_All       (U64Max)
+    string Name;            // NOTE(vak): Name of weapon
+    f32 Damage;             // NOTE(vak): Damage of each bullet
+    f32 Cooldown;           // NOTE(vak): Seconds until weapon can be fired again
+    f32 Recoil;             // NOTE(vak): How much the player is pushed back when firing
+    f32 Speed;              // NOTE(vak): Speed that bullet flies up
+    f32 Spread;             // NOTE(vak): How much bullet may deviate from original trajectory
+    shot_kind ShotKind;     // NOTE(vak): Single-shot, triple-shot, ....
+} weapon;
+
+// NOTE(vak): Negative cooldown means that weapon can't shoot
+
+#define WeaponNone    (weapon){Str("None"),     00.00f,  -1.000f, 00.000f, 00.000f, 0.000f,  ShotKind_Single}
+#define WeaponPistol  (weapon){Str("Pistol"),   15.00f,   0.200f, 03.000f, 20.000f, 1.000f,  ShotKind_Single}
+#define WeaponRifle   (weapon){Str("Rifle"),    20.00f,   0.100f, 06.000f, 25.000f, 1.100f,  ShotKind_Single}
+#define WeaponShotgun (weapon){Str("Shotgun"),  18.50f,   0.275f, 10.500f, 25.000f, 1.400f,  ShotKind_Triple}
 
 typedef struct
 {
-    body_id BodyID;
-    v4      Color;
-    float   ShootTimer;
-    float   CurrentHealth;
-    float   MaxHealth;
-} player;
-
-typedef struct
-{
-    b32                 Alive;
-    f32                 Damage;
-    body_id             BodyID;
-    v4                  Color;
-} bullet;
+    string  Name;
+    f32     BasePrice;
+} gear_info;
 
 typedef enum
 {
-    EnemyKind_Grunt     = 0,
-    EnemyKind_Mover,
-    EnemyKind_Armored,
-    EnemyKind_COUNT,
-} enemy_kind;
+    Gear_HealthPack,        // NOTE(vak): +10% Health Multiplier for each pack (max stack 5)
+    Gear_FireRatePack,      // NOTE(vak): +10% Fire rate multiplier for each pack (max stack 5)
+    Gear_DamagePack,        // NOTE(vak): +10% Damage Multiplier for each pack (max stack 5)
 
-typedef struct enemy enemy;
+    Gear_COUNT,
+} gear;
 
-typedef void enemy_think(enemy* Enemy, f32 DeltaTime);
-
-struct enemy
+static gear_info GearInfos[Gear_COUNT] =
 {
-    enemy_kind  Kind;
-    b32         Alive;
-    v2          RestP;
-    body_id     BodyID;
-    v4          Color;
-    f32         CurrentHealth;
-    f32         ShootTimer;
-    f32         MaxHealth;
-    f32         ShootCooldown;
-
-    union
-    {
-        struct { f32 ShuffleTimer; } Mover;
-    };
+    [Gear_HealthPack]       = {StaticStr("Health Pack"),        5.0f},
+    [Gear_FireRatePack]     = {StaticStr("Fire Rate Pack"),     5.0f},
+    [Gear_DamagePack]       = {StaticStr("Damage Pack"),        5.0f},
 };
 
 typedef struct
 {
-    f32         Lifetime;
-    f32         Remaining;
-    body_id     BodyID;
-    v4          Color;
+    v2 P;
+    f32 FocalLength;
+    f32 AspectRatio;
+    u32 WindowWidth;
+    u32 WindowHeight;
+} camera;
+
+typedef struct
+{
+    b32 Alive;
+    f32 SecondsRemaining;
+} timer;
+
+typedef struct
+{
+    b32 Alive;
+    b32 ShotByPlayer;
+    f32 Damage;
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v2 Size;
+    v4 Color;
+} bullet;
+
+typedef struct
+{
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v2 Size;
+    v4 Color;
+    timer* ShootTimer;
+    u32 WeaponIndex;
+    weapon WeaponSlots[3];
+
+    smooth_f32 HealthPercent;
+    f32 MaxHealth;
+    f32 BaseHealth;
+
+    f32 DamagedFadeRemaining;
+    f32 DamagedFadeTime;
+
+    u32 EquippedGearCounts[Gear_COUNT];
+} player;
+
+typedef struct
+{
+    b32 Alive;
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v2 Size;
+    v4 Color;
+    f32 TotalSeconds;
+    f32 RemainingSeconds;
 } particle;
 
-typedef enum
+typedef struct
 {
-    EntityKind_Player   = 0,
-    EntityKind_Enemy,
-    EntityKind_Bullet,
-    EntityKind_COUNT,
-} entity_kind;
+    b32 Alive;
+    v2 RestP;
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v2 Size;
+    v4 Color;
+    timer* ShootTimer;
+    f32 ShootCooldown;
+
+    smooth_f32 Health;
+    f32 MaxHealth;
+
+    f32 DamagedFadeRemaining;
+    f32 DamagedFadeTime;
+} enemy;
 
 typedef struct
 {
-    entity_kind Kind;
-    union
+    v2 P;
+    v2 DP;
+    v2 DDP;
+    v4 Color;
+    f32 Value;
+    f32 TimeRemaining;
+    f32 TotalTime;
+} damage_text;
+
+static random_state Entropy = {0};
+static u32 Stage = 0;
+static gear ShopSelectingGear = 0;
+static smooth_f32 CurrentMoney = {0};
+static f32 StageFadeRemaining = 0.0f;
+static f32 StageFadeTime = 0.0f;
+static camera Camera = {0};
+static player Player = {0};
+static timer Timers[4096] = {0};
+static bullet Bullets[4096] = {0};
+static particle Particles[4096] = {0};
+static enemy Enemies[4096] = {0};
+static damage_text DamageTexts[512] = {0};
+
+static timer* GameAddTimer(f32 InitialSecondsRemaining)
+{
+    timer* Timer = 0;
+
+    for (usize Index = 0; Index < ArrayCount(Timers); Index++)
     {
-        player* Player;
-        enemy*  Enemy;
-        bullet* Bullet;
-    };
-} entity;
+        if (!Timers[Index].Alive)
+        {
+            Timer = Timers + Index;
+            memset(Timer, 0, sizeof(timer));
+            Timer->Alive = true;
+            Timer->SecondsRemaining = InitialSecondsRemaining;
+            break;
+        }
+    }
 
-typedef struct
+    return (Timer);
+}
+
+static void GameRemoveTimer(timer* Timer)
 {
-    u32             Stage;
-    random_state    Entropy;
-    player          Player;
-    bullet          Bullets[256];
-    enemy           Enemies[256];
-    entity          Entities[1024];
-    particle        Particles[1024];
-} game_state;
+    if (!Timer) return;
+    Timer->Alive = false;
+}
 
-static game_state Game = {0};
-
-static void GameSpawnBullet(f32 Damage, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color, u64 CollisionMask)
+static bullet* GameAddBullet(void)
 {
     bullet* Bullet = 0;
 
-    for (usize Index = 0; Index < ArrayCount(Game.Bullets); Index++)
+    for (usize Index = 0; Index < ArrayCount(Bullets); Index++)
     {
-        bullet* Slot = Game.Bullets + Index;
-        if (!Slot->Alive)
+        if (!Bullets[Index].Alive)
         {
-            Bullet = Slot;
+            Bullet = Bullets + Index;
+            memset(Bullet, 0, sizeof(bullet));
+            Bullet->Alive = true;
             break;
         }
     }
 
-    if (Bullet)
-    {
-        Bullet->Alive       = true;
-        Bullet->BodyID      = AddBody(P, DP, DDP, Size, 1.0f);
-        Bullet->Color       = Color;
-
-        EquipBodyCollisionMask(Bullet->BodyID, CollisionMask);
-    }
+    return (Bullet);
 }
 
-static void GameKillBullet(bullet* Bullet)
+static void GameRemoveBullet(bullet* Bullet)
 {
+    if (!Bullet) return;
     Bullet->Alive = false;
-    RemoveBody(Bullet->BodyID);
 }
 
-static void GameSpawnEnemy(enemy_kind Kind, v2 RestP, v2 P, v2 DP, v2 Size, f32 MaxHealth, f32 ShootCooldown)
-{
-    enemy* Enemy = 0;
-
-    for (usize Index = 0; Index < ArrayCount(Game.Enemies); Index++)
-    {
-        enemy* Slot = Game.Enemies + Index;
-        if (!Slot->Alive)
-        {
-            Enemy = Slot;
-            break;
-        }
-    }
-
-    if (Enemy)
-    {
-        memset(Enemy, 0, sizeof(enemy));
-
-        Enemy->Kind             = Kind;
-        Enemy->Alive            = true;
-        Enemy->RestP            = RestP;
-        Enemy->BodyID           = AddBody(P, DP, V2Zero(), Size, 1.0f);
-        Enemy->CurrentHealth    = MaxHealth;
-        Enemy->ShootTimer       = ShootCooldown * RandomUnilateral(&Game.Entropy);
-        Enemy->MaxHealth        = MaxHealth;
-        Enemy->ShootCooldown    = ShootCooldown;
-
-        EquipBodyCollisionMask(Enemy->BodyID, CollisionMaskFlag_Enemy);
-    }
-}
-
-static void GameEnemyMoverThink(enemy* Enemy, f32 DeltaTime)
-{
-    Enemy->Mover.ShuffleTimer -= DeltaTime;
-
-    if (Enemy->Mover.ShuffleTimer <= 0.0f)
-    {
-        player* Player = &Game.Player;
-        body* PlayerBody = GetBody(Player->BodyID);
-
-        Enemy->RestP = V2(
-            PlayerBody->P.X + 1.0f * RandomBilateral(&Game.Entropy),
-            6.0f            + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        Enemy->Mover.ShuffleTimer = 1.2f;
-    }
-}
-
-static void GameSpawnParticle(f32 Lifetime, v2 P, v2 DP, v2 DDP, v2 Size, v4 Color)
+static particle* GameAddParticle(void)
 {
     particle* Particle = 0;
 
-    for (usize Index = 0; Index < ArrayCount(Game.Particles); Index++)
+    for (usize Index = 0; Index < ArrayCount(Particles); Index++)
     {
-        particle* Slot = Game.Particles + Index;
-        if (Slot->Remaining <= 0.0f)
+        if (!Particles[Index].Alive)
         {
-            Particle = Slot;
+            Particle = Particles + Index;
+            memset(Particle, 0, sizeof(particle));
+            Particle->Alive = true;
             break;
         }
     }
 
-    if (Particle)
+    return (Particle);
+}
+
+static void GameRemoveParticle(particle* Particle)
+{
+    if (!Particle) return;
+    Particle->Alive = false;
+}
+
+static enemy* GameAddEnemy(void)
+{
+    enemy* Enemy = 0;
+
+    for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
     {
-        Particle->Lifetime  = Lifetime;
-        Particle->Remaining = Lifetime;
-        Particle->BodyID    = AddBody(P, DP, DDP, Size, 1.0f);
-        Particle->Color     = Color;
+        if (!Enemies[Index].Alive)
+        {
+            timer* ShootTimer = GameAddTimer(0.0f);
+            if (!ShootTimer)
+                return (0);
+
+            Enemy = Enemies + Index;
+            memset(Enemy, 0, sizeof(enemy));
+            Enemy->Alive = true;
+            Enemy->ShootTimer = ShootTimer;
+            break;
+        }
+    }
+
+    return (Enemy);
+}
+
+static void GameRemoveEnemy(enemy* Enemy)
+{
+    if (!Enemy) return;
+    GameRemoveTimer(Enemy->ShootTimer);
+    Enemy->Alive = false;
+}
+
+static damage_text* GameAddDamageText(void)
+{
+    damage_text* DamageText = 0;
+
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+    {
+        if (DamageTexts[Index].TimeRemaining <= 0.0f)
+        {
+            DamageText = DamageTexts + Index;
+            memset(DamageText, 0, sizeof(damage_text));
+            break;
+        }
+    }
+
+    return (DamageText);
+}
+
+static void GameRemoveDamageText(damage_text* DamageText)
+{
+    if (!DamageText) return;
+    DamageText->TimeRemaining = 0.0f;
+}
+
+static void GameSpawnEnemy(void)
+{
+    enemy* Enemy = GameAddEnemy();
+    if (!Enemy)
+        return;
+
+    Enemy->RestP = V2(
+        0.0f + 6.0f * RandomBilateral(&Entropy),
+        7.0f + 2.0f * RandomBilateral(&Entropy)
+    );
+
+    Enemy->P = V2(
+        0.0f  + 6.0f * RandomBilateral(&Entropy),
+        16.0f + 4.0f * RandomBilateral(&Entropy)
+    );
+
+    Enemy->Size = V2(0.45f, 0.45f);
+    Enemy->Color = V4(0.7f, 0.5f, 0.9f, 1.0f);
+
+    Enemy->ShootCooldown = 3.5f;
+    Enemy->ShootTimer->SecondsRemaining = Enemy->ShootCooldown * RandomUnilateral(&Entropy);
+
+    Enemy->MaxHealth = 100.0f;
+    Enemy->Health = SmoothF32(SmoothKind_Cubed, 0.35f, Enemy->MaxHealth);
+
+    Enemy->DamagedFadeTime = 0.2f;
+}
+
+static void GameSpawnPlayerBullet(v2 SpawnP, v2 Size, f32 VelocityX, f32 AccelerationX, f32 Speed, f32 Spread)
+{
+    bullet* Bullet = GameAddBullet();
+    if (!Bullet)
+        return;
+
+    weapon* CurrentWeapon = Player.WeaponSlots + Player.WeaponIndex;
+
+    f32 DamageMultiplier = 1.0f + 0.10f*Player.EquippedGearCounts[Gear_DamagePack];
+
+    f32 RandomSpread = Spread * RandomBilateral(&Entropy);
+
+    Bullet->ShotByPlayer = true;
+    Bullet->Damage = DamageMultiplier * CurrentWeapon->Damage;
+    Bullet->Size = Size;
+    Bullet->P = SpawnP;
+    Bullet->DP = V2(RandomSpread + VelocityX, Maximum(0, Player.DP.Y) + Speed);
+    Bullet->DDP = V2(RandomSpread + AccelerationX, 26.0f);
+    Bullet->Color = V4(0.4f, 0.7f, 0.9f, 1.0f);
+}
+
+static void GamePlayerShoot(void)
+{
+    if (Player.ShootTimer->SecondsRemaining > 0.0f)
+        return;
+
+    weapon* CurrentWeapon = Player.WeaponSlots + Player.WeaponIndex;
+
+    if (CurrentWeapon->Cooldown < 0.0f)
+        return;
+
+    v2 BulletSize = V2(0.15f, 0.25f);
+    v2 BulletSpawnP = V2(Player.P.X, Player.P.Y + 0.5f*(Player.Size.Y + BulletSize.Y));
+
+    switch (CurrentWeapon->ShotKind)
+    {
+        case ShotKind_Single:
+        {
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, 0, 0, CurrentWeapon->Speed, CurrentWeapon->Spread);
+        } break;
+
+        case ShotKind_Triple:
+        {
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, -1.5f, -1.5f, CurrentWeapon->Speed, CurrentWeapon->Spread);
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize,  0.0f,  0.0f, CurrentWeapon->Speed, CurrentWeapon->Spread);
+            GameSpawnPlayerBullet(BulletSpawnP, BulletSize, +1.5f, +1.5f, CurrentWeapon->Speed, CurrentWeapon->Spread);
+        } break;
+    }
+
+    Player.DP = V2Add(Player.DP, V2(
+        0.0f,
+        -CurrentWeapon->Recoil
+    ));
+
+    u32 SparkCount = 4;
+    for (u32 Index = 0; Index < SparkCount; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.1f + 0.2f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = BulletSpawnP;
+
+        Particle->DP = V2(
+            0.0f + 2.0f * RandomBilateral(&Entropy),
+            2.0f + 3.0f * RandomUnilateral(&Entropy) + Maximum(0, Player.DP.Y)
+        );
+
+        Particle->DDP = V2(
+            0.0f + 10.0f * RandomBilateral(&Entropy),
+            5.0f + 10.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.15f + 0.05f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(1.0f, 0.9f, 0.5f, 1.0f);
+    }
+
+    u32 SmokeCount = 8;
+    for (u32 Index = 0; Index < SmokeCount; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.2f + 0.2f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = BulletSpawnP;
+
+        Particle->DP = V2(
+            0.0f + 3.0f * RandomBilateral(&Entropy),
+            2.0f + 5.0f * RandomUnilateral(&Entropy) + Maximum(0, Player.DP.Y)
+        );
+
+        Particle->DDP = V2(
+            0.0f + 5.0f * RandomBilateral(&Entropy),
+            5.0f + 5.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.05f + 0.1f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(0.6f, 0.6f, 0.6f, 1.0f);
+    }
+
+    f32 FireRateMultiplier = 1.0f + 0.1f*Player.EquippedGearCounts[Gear_FireRatePack];
+
+    Player.ShootTimer->SecondsRemaining = CurrentWeapon->Cooldown / FireRateMultiplier;
+}
+
+static void GameEnemyShoot(enemy* Enemy)
+{
+    if (Enemy->ShootTimer->SecondsRemaining > 0.0f)
+        return;
+
+    bullet* Bullet = GameAddBullet();
+    if (!Bullet)
+        return;
+
+    Enemy->RestP = V2(
+        0.0f + 6.0f * RandomBilateral(&Entropy),
+        7.0f + 2.0f * RandomBilateral(&Entropy)
+    );
+
+    Enemy->DP = V2Add(Enemy->DP, V2(
+        0.0f,
+        3.0f + 1.0f * RandomUnilateral(&Entropy)
+    ));
+
+    Bullet->ShotByPlayer = false;
+    Bullet->Damage = 30.0f + 1.0f*Stage;
+    Bullet->Size = V2(0.1f, 0.2f);
+    Bullet->P = V2(Enemy->P.X, Enemy->P.Y - 0.5f*(Enemy->Size.Y + Bullet->Size.Y));
+    Bullet->DP = V2(0.0f, Minimum(0, Enemy->DP.Y) - 8.0f);
+    Bullet->DDP = V2(0.0f, -4.0f);
+    Bullet->Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
+
+    u32 SparkCount = 4;
+    for (u32 Index = 0; Index < SparkCount; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.2f + 0.2f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = Bullet->P;
+
+        Particle->DP = V2(
+            +0.0f + 2.0f * RandomBilateral(&Entropy),
+            -2.0f - 3.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->DDP = V2(
+            +0.0f + 10.0f * RandomBilateral(&Entropy),
+            -5.0f - 10.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.05f + 0.05f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(0.9f, 0.8f, 0.5f, 1.0f);
+    }
+
+    u32 SmokeCount = 4;
+    for (u32 Index = 0; Index < SmokeCount; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.2f + 0.2f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = Bullet->P;
+
+        Particle->DP = V2(
+            +0.0f + 3.0f * RandomBilateral(&Entropy),
+            -2.0f - 5.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->DDP = V2(
+            +0.0f + 5.0f * RandomBilateral(&Entropy),
+            -5.0f - 5.0f * RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.05f + 0.1f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(0.6f, 0.6f, 0.6f, 1.0f);
+    }
+
+    Enemy->ShootTimer->SecondsRemaining = Enemy->ShootCooldown;
+}
+
+static f32 GameGetEnemyKillMoney(void)
+{
+    f32 Multiplier = 1.0f;
+    for (usize Index = 1; Index < Stage; Index++)
+        Multiplier *= 1.025f;
+
+    return 2.0f*Multiplier;
+}
+
+static void GameDoEnemyDeathParticles(enemy* Enemy)
+{
+    u32 Count = 8;
+    for (u32 Index = 0; Index < Count; Index++)
+    {
+        particle* Particle = GameAddParticle();
+
+        Particle->TotalSeconds = 0.2f + 0.1f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = Enemy->P;
+
+        Particle->DP = V2(
+            7.0f*RandomBilateral(&Entropy),
+            7.0f*RandomBilateral(&Entropy)
+        );
+
+        Particle->DDP = Particle->DP;
+
+        Particle->Size = V2Scalar(0.5f + 0.2f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
     }
 }
 
-static void GamePlayerTryShoot(void)
+static void GameBulletHitPlayer(bullet* Bullet)
 {
-    player* Player = &Game.Player;
+    f32 Knockback = 1.75f;
+    Player.DP = V2Add(Player.DP, V2MulScalar(Bullet->DP, Knockback));
 
-    if (Player->ShootTimer > 0.0f)
-        return;
+    f32 DecrementT = Bullet->Damage / Player.MaxHealth;
 
-    body* PlayerBody = GetBody(Player->BodyID);
+    f32 NewHealthPercent = Player.HealthPercent.Now - DecrementT;
+    SetSmoothF32(&Player.HealthPercent, NewHealthPercent);
 
-    v2  BulletSize = V2(0.1f, 0.2f);
-    f32 Damage = 20.0f;
-    v2  SpawnP = V2(PlayerBody->P.X, PlayerBody->P.Y + PlayerBody->Size.Y + 0.5f*BulletSize.Y);
-    v2  SpawnDP = V2(0.0f, Maximum(0.0f, PlayerBody->DP.Y) + 8.0f);
-    v2  SpawnDDP = V2(0.0f, 20.0f);
-    v4  BulletColor = V4(0.5f, 0.8f, 1.0f, 1.0f);
+    Player.DamagedFadeRemaining = Player.DamagedFadeTime;
 
-    v2 SpreadDP[3] =
+    damage_text* DamageText = GameAddDamageText();
+
+    DamageText->P = Player.P;
+    DamageText->DP = V2(4.0f*RandomBilateral(&Entropy), 5.0f);
+    DamageText->DDP = V2(DamageText->DP.X, -12.0f);
+    DamageText->Value = Bullet->Damage;
+    DamageText->Color = V4(1.0f, 0.5f, 0.5f, 1.0f);
+    DamageText->TotalTime = 0.8f;
+    DamageText->TimeRemaining = DamageText->TotalTime;
+
+    u32 SplatCount = 8;
+    for (u32 Index = 0; Index < SplatCount; Index++)
     {
-        V2(+0.0f, 0.0f),
-        V2(-1.5f, 0.0f),
-        V2(+1.5f, 0.0f),
-    };
+        particle* Particle = GameAddParticle();
 
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[0]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[1]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
-    GameSpawnBullet(Damage, SpawnP, V2Add(SpawnDP, SpreadDP[2]), SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Enemy);
+        Particle->TotalSeconds = 0.3f + 0.1f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
 
-    Player->ShootTimer = 0.1f;
+        Particle->P = Bullet->P;
 
-    usize SmokeParticleCount    = 8;
-    usize FireParticleCount     = 4;
+        Particle->DP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            +1.0f + 1.0f*RandomUnilateral(&Entropy)
+        );
 
-    for (usize Index = 0; Index < SmokeParticleCount; Index++)
-    {
-        float   SmokeLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-        v2      SmokeP          = SpawnP;
-        v2      SmokeDP         = V2(2.0f*RandomBilateral(&Game.Entropy), 5.0f*RandomUnilateral(&Game.Entropy));
-        v2      SmokeDDP        = SmokeDP;
-        v2      SmokeSize       = V2Scalar(0.05f + 0.05f*RandomUnilateral(&Game.Entropy));
-        v4      SmokeColor      = V4(0.3f, 0.3f, 0.3f, 1.0f);
+        Particle->DDP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            +1.0f + 2.0f*RandomUnilateral(&Entropy)
+        );
 
-        GameSpawnParticle(SmokeLifetime, SmokeP, SmokeDP, SmokeDDP, SmokeSize, SmokeColor);
+        Particle->Size = V2Scalar(0.1f + 0.3f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(1.0f, 1.0f, 1.0f, 0.8f);
     }
 
-    for (usize Index = 0; Index < FireParticleCount; Index++)
-    {
-        float   FireLifetime   = 0.2f + 0.1f*RandomUnilateral(&Game.Entropy);
-        v2      FireP          = SpawnP;
-        v2      FireDP         = V2(2.0f*RandomBilateral(&Game.Entropy), 3.0f*RandomUnilateral(&Game.Entropy));
-        v2      FireDDP        = FireDP;
-        v2      FireSize       = V2Scalar(0.15f + 0.05f*RandomUnilateral(&Game.Entropy));
-        v4      FireColor      = V4(0.8f, 0.7f, 0.3f, 1.0f);
-
-        GameSpawnParticle(FireLifetime, FireP, FireDP, FireDDP, FireSize, FireColor);
-    }
+    GameRemoveBullet(Bullet);
 }
 
-static void GameEnemyTryShoot(enemy* Enemy)
+static void GameBulletHitEnemy(enemy* Enemy, bullet* Bullet)
 {
-    if (Enemy->ShootTimer > 0.0f)
+    if (!Enemy->Alive)
         return;
 
-    body* EnemyBody = GetBody(Enemy->BodyID);
+    f32 Knockback = 0.02f;
+    Enemy->DP = V2Add(Enemy->DP, V2MulScalar(Bullet->DP, Knockback));
 
-    v2  BulletSize = V2(0.1f, 0.1f);
-    f32 Damage = 20.0f;
-    v2  SpawnP = V2(EnemyBody->P.X, EnemyBody->P.Y - EnemyBody->Size.Y - 0.5f*BulletSize.Y);
-    v2  SpawnDP = V2(0.0f, -5.0f);
-    v2  SpawnDDP = V2(0.0f, -10.0f);
-    v4  BulletColor = V4(1.0f, 0.4f, 0.2f, 1.0f);
+    f32 NewHealth = Enemy->Health.Now - Bullet->Damage;
+    SetSmoothF32(&Enemy->Health, NewHealth);
 
-    GameSpawnBullet(Damage, SpawnP, SpawnDP, SpawnDDP, BulletSize, BulletColor, CollisionMaskFlag_Player);
+    Enemy->DamagedFadeRemaining = Enemy->DamagedFadeTime;
 
-    usize SmokeParticleCount    = 8;
-    usize FireParticleCount     = 4;
+    damage_text* DamageText = GameAddDamageText();
 
-    for (usize Index = 0; Index < SmokeParticleCount; Index++)
+    DamageText->P = Enemy->P;
+    DamageText->DP = V2(4.0f*RandomBilateral(&Entropy), 5.0f);
+    DamageText->DDP = V2(DamageText->DP.X, -12.0f);
+    DamageText->Color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+    DamageText->Value = Bullet->Damage;
+    DamageText->TotalTime = 0.8f;
+    DamageText->TimeRemaining = DamageText->TotalTime;
+
+    u32 SplatCount = 8;
+    for (u32 Index = 0; Index < SplatCount; Index++)
     {
-        float   SmokeLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-        v2      SmokeP          = SpawnP;
-        v2      SmokeDP         = V2(2.0f*RandomBilateral(&Game.Entropy), -5.0f*RandomUnilateral(&Game.Entropy));
-        v2      SmokeDDP        = SmokeDP;
-        v2      SmokeSize       = V2Scalar(0.05f + 0.05f*RandomUnilateral(&Game.Entropy));
-        v4      SmokeColor      = V4(0.3f, 0.3f, 0.3f, 1.0f);
+        particle* Particle = GameAddParticle();
 
-        GameSpawnParticle(SmokeLifetime, SmokeP, SmokeDP, SmokeDDP, SmokeSize, SmokeColor);
+        Particle->TotalSeconds = 0.3f + 0.1f*RandomUnilateral(&Entropy);
+        Particle->RemainingSeconds = Particle->TotalSeconds;
+
+        Particle->P = Bullet->P;
+
+        Particle->DP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            -1.0f - 1.0f*RandomUnilateral(&Entropy)
+        );
+
+        Particle->DDP = V2(
+            +0.0f + 4.0f*RandomBilateral(&Entropy),
+            -1.0f - 2.0f*RandomUnilateral(&Entropy)
+        );
+
+        Particle->Size = V2Scalar(0.1f + 0.3f*RandomUnilateral(&Entropy));
+
+        Particle->Color = V4(1.0f, 1.0f, 1.0f, 0.8f);
     }
 
-    for (usize Index = 0; Index < FireParticleCount; Index++)
+    if (Enemy->Health.Now <= 0.0f)
     {
-        float   FireLifetime   = 0.2f + 0.1f*RandomUnilateral(&Game.Entropy);
-        v2      FireP          = SpawnP;
-        v2      FireDP         = V2(2.0f*RandomBilateral(&Game.Entropy), -3.0f*RandomUnilateral(&Game.Entropy));
-        v2      FireDDP        = FireDP;
-        v2      FireSize       = V2Scalar(0.1f + 0.05f*RandomUnilateral(&Game.Entropy));
-        v4      FireColor      = V4(0.8f, 0.7f, 0.3f, 1.0f);
+        GameDoEnemyDeathParticles(Enemy);
+        GameRemoveEnemy(Enemy);
 
-        GameSpawnParticle(FireLifetime, FireP, FireDP, FireDDP, FireSize, FireColor);
+        SetSmoothF32(&CurrentMoney, CurrentMoney.Now + GameGetEnemyKillMoney());
     }
 
-    Enemy->ShootTimer = Enemy->ShootCooldown;
+    GameRemoveBullet(Bullet);
 }
 
 static b32 GameAreAllEnemiesDead(void)
 {
     b32 AllDead = true;
 
-    for (usize Index = 0; Index < ArrayCount(Game.Enemies); Index++)
+    for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
     {
-        enemy* Enemy = Game.Enemies + Index;
-
-        if (Enemy->Alive)
+        if (Enemies[Index].Alive)
         {
             AllDead = false;
             break;
@@ -871,471 +662,776 @@ static b32 GameAreAllEnemiesDead(void)
     return (AllDead);
 }
 
+static usize GameGetStageRewardMoney(void)
+{
+    f32 Multiplier = 1.0f;
+    for (u32 Index = 0; Index < Stage; Index++)
+        Multiplier *= 1.5f;
+
+    return 5.0f*Multiplier;
+}
+
 static void GameStartNewStage(void)
 {
-    usize GruntCount = 10 + 1*Game.Stage;
+    u32 EnemyCount = 3 + 5*Stage;
+    for (u32 Index = 0; Index < EnemyCount; Index++)
+        GameSpawnEnemy();
 
-    for (usize Index = 0; Index < GruntCount; Index++)
-    {
-        v2 RandomRestP = V2(
-            0.0f + 6.0f * RandomBilateral(&Game.Entropy),
-            6.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
+    Stage++;
+    StageFadeTime = 2.75f;
+    StageFadeRemaining = StageFadeTime;
 
-        v2 RandomP = V2(
-            0.0f  + 6.0f * RandomBilateral(&Game.Entropy),
-            20.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 EnemySize = V2(0.6f, 0.4f);
-
-        f32 EnemyHealth = 100.0f;
-        f32 ShootCooldown = 1.7f;
-
-        GameSpawnEnemy(EnemyKind_Grunt, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
-    }
-
-    usize MoverCount = Game.Stage;
-
-    for (usize Index = 0; Index < MoverCount; Index++)
-    {
-        v2 RandomRestP = V2(
-            0.0f + 6.0f * RandomBilateral(&Game.Entropy),
-            6.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 RandomP = V2(
-            0.0f  + 6.0f * RandomBilateral(&Game.Entropy),
-            20.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 EnemySize = V2(0.4f, 0.4f);
-
-        f32 EnemyHealth = 120.0f;
-        f32 ShootCooldown = 1.2f;
-
-        GameSpawnEnemy(EnemyKind_Mover, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
-    }
-
-    usize ArmoredCount = Maximum(0, (ssize)Game.Stage - 1);
-
-    for (usize Index = 0; Index < ArmoredCount; Index++)
-    {
-        v2 RandomRestP = V2(
-            0.0f + 6.0f * RandomBilateral(&Game.Entropy),
-            6.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 RandomP = V2(
-            0.0f  + 6.0f * RandomBilateral(&Game.Entropy),
-            20.0f + 2.0f * RandomBilateral(&Game.Entropy)
-        );
-
-        v2 EnemySize = V2(0.8f, 0.6f);
-
-        f32 EnemyHealth = 300.0f;
-        f32 ShootCooldown = 2.1f;
-
-        GameSpawnEnemy(EnemyKind_Armored, RandomRestP, RandomP, V2Zero(), EnemySize, EnemyHealth, ShootCooldown);
-    }
-
-    Game.Stage++;
+    SetSmoothF32(&CurrentMoney, CurrentMoney.Now + GameGetStageRewardMoney());
 }
 
 static void GameRestart(void)
 {
-    usize SavedEntropy = Game.Entropy.State;
+    for (usize Index = 0; Index < ArrayCount(Timers); Index++)
+        GameRemoveTimer(Timers + Index);
 
-    memset(&Game, 0, sizeof(game_state));
+    for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
+        GameRemoveEnemy(Enemies + Index);
 
-    Game.Entropy.State = SavedEntropy;
+    for (usize Index = 0; Index < ArrayCount(Bullets); Index++)
+        GameRemoveBullet(Bullets + Index);
 
-    player* Player = &Game.Player;
+    for (usize Index = 0; Index < ArrayCount(Particles); Index++)
+        GameRemoveParticle(Particles + Index);
 
-    v2 InitialP = V2(0.0f, -6.5f);
-    v2 Size = V2(0.6f, 0.3f);
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
+        memset(DamageTexts + Index, 0, sizeof(damage_text));
 
-    Player->BodyID = AddBody(InitialP, V2Zero(), V2Zero(), Size, 1.0f);
-    Player->MaxHealth = 120.0f;
-    Player->CurrentHealth = Player->MaxHealth;
+    memset(&Player, 0, sizeof(player));
 
+    Player.P = V2(0.0f, -6.5f);
+    Player.Size = V2(0.6f, 0.5f);
+    Player.Color = V4(1.0f, 0.8f, 0.5f, 1.0f);
+    Player.ShootTimer = GameAddTimer(0.0f);
+    Player.BaseHealth = 150.0f;
+    Player.MaxHealth = Player.BaseHealth;
+    Player.HealthPercent = SmoothF32(SmoothKind_Cubed, 0.35f, 1.0f);
+    Player.DamagedFadeTime = 0.2f;
+
+    Player.WeaponSlots[0] = WeaponRifle;
+    Player.WeaponSlots[1] = WeaponPistol;
+    Player.WeaponSlots[2] = WeaponShotgun;
+    Player.WeaponIndex = 0;
+
+    CurrentMoney = SmoothF32(SmoothKind_Cubed, 0.75f, 0.0f);
+    Stage = 0;
     GameStartNewStage();
 }
 
 static void GameSetup(usize RandomSeed)
 {
-    Game.Entropy.State = RandomSeed;
+    Entropy.State = RandomSeed;
     GameRestart();
+}
+
+// NOTE(vak): Assumes screen origin (0, 0) at bottom-left
+static v2 ConvertWorldToScreenP(v2 WorldP)
+{
+    v2 ViewSize = V2(
+        Camera.AspectRatio / Camera.FocalLength,
+        1.0f / Camera.FocalLength
+    );
+
+    rect2 ViewRect = R2CenterSize(Camera.P, ViewSize);
+
+    v2 Normalized = V2Div(V2Sub(WorldP, ViewRect.Min), ViewSize);
+    v2 ScreenP = V2Mul(Normalized, V2((f32)Camera.WindowWidth, (f32)Camera.WindowHeight));
+
+    return (ScreenP);
+}
+
+// NOTE(vak): Assumes screen origin (0, 0) at bottom-left
+static v2 ConvertScreenToWorldP(v2 ScreenP)
+{
+    v2 ViewSize = V2(
+        Camera.AspectRatio / Camera.FocalLength,
+        1.0f / Camera.FocalLength
+    );
+
+    rect2 ViewRect = R2CenterSize(Camera.P, ViewSize);
+
+    v2 Normalized = V2Div(ScreenP, V2((f32)Camera.WindowWidth, (f32)Camera.WindowHeight));
+    v2 WorldP = V2Add(ViewRect.Min, V2Mul(Normalized, ViewSize));
+
+    return (WorldP);
 }
 
 static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 {
-    f32 AspectRatio = (f32)Width / (f32)Height;
-    f32 FocalLength = 0.05f;
+    Camera.P = V2(0, 0);
+    Camera.FocalLength = 0.05f;
+    Camera.AspectRatio = (f32)Width / (f32)Height;
+    Camera.WindowWidth = Width;
+    Camera.WindowHeight = Height;
 
-    v2 ViewCenter = V2(0.0f, 0.0f);
-    v2 ViewSize   = V2(
-        AspectRatio / FocalLength,
-        1.0f        / FocalLength
+    v2 ViewSize = V2(
+        Camera.AspectRatio / Camera.FocalLength,
+        1.0f / Camera.FocalLength
     );
 
-    rect2 ViewRect = R2CenterSize(ViewCenter, ViewSize);
+    rect2 ViewRect = R2CenterSize(Camera.P, ViewSize);
 
     RenderOrthographic2D(ViewRect);
 
-    player* Player = &Game.Player;
+    if (GameAreAllEnemiesDead())
+    {
+        GameStartNewStage();
+    }
 
-    // NOTE(vak): Restart game if player is dead
-
-    if (Player->CurrentHealth <= 0.0f)
+    if (Player.HealthPercent.Now <= 1e-7f)
         GameRestart();
 
-    // NOTE(vak): Start new stage if all enemies are dead
+    UpdateSmoothF32(&CurrentMoney);
 
-    if (GameAreAllEnemiesDead())
-        GameStartNewStage();
-
-    // NOTE(vak): Kill all bullets outside of view
-
-    for (usize Index = 0; Index < ArrayCount(Game.Bullets); Index++)
+    for (usize Index = 0; Index < ArrayCount(Timers); Index++)
     {
-        bullet* Bullet = Game.Bullets + Index;
+        if (!Timers[Index].Alive) continue;
 
-        if (!Bullet->Alive)
-            continue;
+        timer* Timer = Timers + Index;
 
-        rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
-        if (!R2Intersects(BulletRect, ViewRect))
-            Bullet->Alive = false;
+        Timer->SecondsRemaining -= DeltaTime;
+        Timer->SecondsRemaining = Maximum(0, Timer->SecondsRemaining);
     }
 
-    // NOTE(vak): Update particles
-
-    for (usize Index = 0; Index < ArrayCount(Game.Particles); Index++)
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
     {
-        particle* Particle = Game.Particles + Index;
+        damage_text* DamageText = DamageTexts + Index;
+        DamageText->TimeRemaining -= DeltaTime;
+        DamageText->TimeRemaining = Maximum(0, DamageText->TimeRemaining);
 
-        if (Particle->Remaining <= 0.0f)
+        DamageText->DP = V2Add(DamageText->DP, V2MulScalar(DamageText->DDP, DeltaTime));
+        DamageText->P = V2Add(DamageText->P, V2MulScalar(DamageText->DP, DeltaTime));
+    }
+
+    for (usize Index = 0; Index < ArrayCount(Particles); Index++)
+    {
+        if (!Particles[Index].Alive) continue;
+
+        particle* Particle = Particles + Index;
+
+        Particle->RemainingSeconds -= DeltaTime;
+
+        if (Particle->RemainingSeconds <= 0.0f)
+        {
+            GameRemoveParticle(Particle);
             continue;
-
-        Particle->Remaining -= DeltaTime;
-        Particle->Remaining = Maximum(Particle->Remaining, 0.0f);
+        }
 
         Particle->DP = V2Add(Particle->DP, V2MulScalar(Particle->DDP, DeltaTime));
-        Particle->P  = V2Add(Particle->P,  V2MulScalar(Particle->DP,  DeltaTime));
+        Particle->P = V2Add(Particle->P, V2MulScalar(Particle->DP, DeltaTime));
+
+        f32 T = Particle->RemainingSeconds / Particle->TotalSeconds;
+
+        v4 FadedColor = V4Mul(Particle->Color, V4(1, 1, 1, T));
+
+        RenderRect(R2CenterSize(Particle->P, Particle->Size), FadedColor);
     }
 
-    // NOTE(vak): Update bullets
-
-    for (usize Index = 0; Index < ArrayCount(Game.Bullets); Index++)
+    for (usize Index = 0; Index < ArrayCount(Bullets); Index++)
     {
-        bullet* Bullet = Game.Bullets + Index;
+        if (!Bullets[Index].Alive) continue;
 
-        if (!Bullet->Alive)
-            continue;
+        bullet* Bullet = Bullets + Index;
 
-        Bullet->DP  = V2Add(Bullet->DP, V2MulScalar(Bullet->DDP,    DeltaTime));
-        Bullet->P   = V2Add(Bullet->P,  V2MulScalar(Bullet->DP,     DeltaTime));
+        Bullet->DP = V2Add(Bullet->DP, V2MulScalar(Bullet->DDP, DeltaTime));
+        Bullet->P = V2Add(Bullet->P, V2MulScalar(Bullet->DP, DeltaTime));
 
-        enemy* Enemy = GameGetEnemyHitByBullet(Bullet);
-        if (Enemy)
+        rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
+        if (!R2Intersects(ViewRect, BulletRect))
         {
-            Enemy->CurrentHealth -= Bullet->Damage;
-            Enemy->Alive = (Enemy->CurrentHealth > 0.0f);
-            Bullet->Alive = false;
-
-            if (Enemy->Alive == false)
-            {
-                usize DeathParticleCount = 16;
-
-                for (usize Index = 0; Index < DeathParticleCount; Index++)
-                {
-                    float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-                    v2      ParticleP          = Enemy->P;
-                    v2      ParticleDP         = V2(3.0f*RandomBilateral(&Game.Entropy), 3.0f*RandomBilateral(&Game.Entropy));
-                    v2      ParticleDDP        = ParticleDP;
-                    v2      ParticleSize       = V2Scalar(0.4f + 0.1f*RandomUnilateral(&Game.Entropy));
-                    v4      ParticleColor      = V4(1.0f, 1.0f, 1.0f, 1.0f);
-
-                    GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
-                }
-            }
-
-            v2 KnockbackDirection = V2NormalizeOrZero(V2Add(Bullet->DP, V2Sub(Enemy->P, Bullet->P)));
-            f32 KnockbackStrength = 5.0f;
-
-            Enemy->DP = V2Add(Enemy->DP, V2MulScalar(KnockbackDirection, KnockbackStrength));
-
-            usize HitParticleCount = 8;
-
-            for (usize Index = 0; Index < HitParticleCount; Index++)
-            {
-                float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-                v2      ParticleP          = Bullet->P;
-                v2      ParticleDP         = V2(2.0f*RandomBilateral(&Game.Entropy), 2.0f*RandomBilateral(&Game.Entropy));
-                v2      ParticleDDP        = ParticleDP;
-                v2      ParticleSize       = V2Scalar(0.15f + 0.1f*RandomUnilateral(&Game.Entropy));
-                v4      ParticleColor      = V4(0.8f, 0.8f, 0.8f, 0.8f);
-
-                GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
-            }
+            GameRemoveBullet(Bullet);
+            continue;
         }
 
-        if (GameIsPlayerHitByBullet(Bullet))
+        RenderRect(BulletRect, Bullet->Color);
+    }
+
+    for (usize EnemyIndex = 0; EnemyIndex < ArrayCount(Enemies); EnemyIndex++)
+    {
+        if (!Enemies[EnemyIndex].Alive) continue;
+        enemy* Enemy = Enemies + EnemyIndex;
+
+        rect2 EnemyRect = R2CenterSize(Enemy->P, Enemy->Size);
+
+        for (usize BulletIndex = 0; BulletIndex < ArrayCount(Bullets); BulletIndex++)
         {
-            Player->CurrentHealth -= Bullet->Damage;
-            Player->CurrentHealth = Maximum(0.0f, Player->CurrentHealth);
-            Bullet->Alive = false;
+            if (!Bullets[BulletIndex].Alive) continue;
+            if (!Bullets[BulletIndex].ShotByPlayer) continue;
 
-            usize HitParticleCount = 8;
+            bullet* Bullet = Bullets + BulletIndex;
 
-            for (usize Index = 0; Index < HitParticleCount; Index++)
-            {
-                float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-                v2      ParticleP          = Bullet->P;
-                v2      ParticleDP         = V2(2.0f*RandomBilateral(&Game.Entropy), 2.0f*RandomBilateral(&Game.Entropy));
-                v2      ParticleDDP        = ParticleDP;
-                v2      ParticleSize       = V2Scalar(0.15f + 0.1f*RandomUnilateral(&Game.Entropy));
-                v4      ParticleColor      = V4(0.9f, 0.8f, 0.7f, 0.8f);
+            rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
 
-                GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
-            }
+            if (R2Intersects(EnemyRect, BulletRect))
+                GameBulletHitEnemy(Enemy, Bullet);
         }
     }
 
-    // NOTE(vak): Update enemies
-
-    for (usize Index = 0; Index < ArrayCount(Game.Enemies); Index++)
     {
-        enemy* Enemy = Game.Enemies + Index;
+        rect2 PlayerRect = R2CenterSize(Player.P, Player.Size);
 
-        if (!Enemy->Alive)
-            continue;
-
-        if (GameIsPlayerHittingEnemy(Enemy))
+        for (usize BulletIndex = 0; BulletIndex < ArrayCount(Bullets); BulletIndex++)
         {
-            float PlayerHealth = Maximum(0, Player->CurrentHealth);
+            if (!Bullets[BulletIndex].Alive) continue;
+            if (Bullets[BulletIndex].ShotByPlayer) continue;
 
-            Player->CurrentHealth -= Maximum(0, Enemy->CurrentHealth);
-            Enemy->CurrentHealth  -= PlayerHealth;
-            Enemy->Alive           = (Enemy->CurrentHealth >= 0.0f);
+            bullet* Bullet = Bullets + BulletIndex;
 
-            if (Enemy->Alive == false)
-            {
-                usize DeathParticleCount = 16;
+            rect2 BulletRect = R2CenterSize(Bullet->P, Bullet->Size);
 
-                for (usize Index = 0; Index < DeathParticleCount; Index++)
-                {
-                    float   ParticleLifetime   = 0.3f + 0.2f*RandomUnilateral(&Game.Entropy);
-                    v2      ParticleP          = Enemy->P;
-                    v2      ParticleDP         = V2(3.0f*RandomBilateral(&Game.Entropy), 3.0f*RandomBilateral(&Game.Entropy));
-                    v2      ParticleDDP        = ParticleDP;
-                    v2      ParticleSize       = V2Scalar(0.4f + 0.1f*RandomUnilateral(&Game.Entropy));
-                    v4      ParticleColor      = V4(1.0f, 1.0f, 1.0f, 1.0f);
-
-                    GameSpawnParticle(ParticleLifetime, ParticleP, ParticleDP, ParticleDDP, ParticleSize, ParticleColor);
-                }
-            }
+            if (R2Intersects(PlayerRect, BulletRect))
+                GameBulletHitPlayer(Bullet);
         }
+    }
 
-        static enemy_think* ThinkFor[EnemyKind_COUNT] =
-        {
-            [EnemyKind_Grunt]   = 0,
-            [EnemyKind_Mover]   = GameEnemyMoverThink,
-            [EnemyKind_Armored] = 0,
-        };
+    for (usize Index = 0; Index < ArrayCount(Enemies); Index++)
+    {
+        if (!Enemies[Index].Alive) continue;
 
-        if (ThinkFor[Enemy->Kind])
-        {
-            ThinkFor[Enemy->Kind](Enemy, DeltaTime);
-        }
+        enemy* Enemy = Enemies + Index;
 
-        Enemy->ShootTimer -= DeltaTime;
-        Enemy->ShootTimer = Maximum(0.0f, Enemy->ShootTimer);
+        GameEnemyShoot(Enemy);
 
-        GameEnemyTryShoot(Enemy);
+        UpdateSmoothF32(&Enemy->Health);
 
-        v2  MoveDirection   = V2NormalizeOrZero(V2Sub(Enemy->RestP, Enemy->P));
-        f32 MoveFriction    = 7.0f;
-        f32 MoveForce       = 25.0f;
+        v2 Direction = V2NormalizeOrZero(V2Sub(Enemy->RestP, Enemy->P));
+        f32 Friction = 2.5f;
+        f32 Force = 10.0f;
 
-        v2 EnemyDDP = V2Sub(
-            V2ScalarMul(MoveForce,      MoveDirection),
-            V2ScalarMul(MoveFriction,   Enemy->DP)
+        Enemy->DDP = V2Sub(
+            V2ScalarMul(Force, Direction),
+            V2ScalarMul(Friction, Enemy->DP)
         );
 
-        f32 JitterStrength = 0.3f;
+        f32 JitterStrength = 30.0f;
 
-        v2 JitterDirection = V2NormalizeOrZero(V2(
-            RandomBilateral(&Game.Entropy),
-            RandomBilateral(&Game.Entropy)
-        ));
-
-        Enemy->DP = V2Add(Enemy->DP, V2Add(
-            V2MulScalar(EnemyDDP, DeltaTime),
-            V2MulScalar(JitterDirection, JitterStrength)
-        ));
-
-        Enemy->P = V2Add(Enemy->P,  V2MulScalar(Enemy->DP, DeltaTime));
-    }
-
-    // NOTE(vak): Update player
-
-    {
-        Player->ShootTimer -= DeltaTime;
-        Player->ShootTimer = Maximum(0, Player->ShootTimer);
-
-        v2 MoveDirection = V2(0, 0);
-
-
-        if (InputIsButtonDown(InputButton_Shoot))       GamePlayerTryShoot();
-
-        if (InputIsButtonDown(InputButton_MoveLeft))    MoveDirection.X -= 1.0f;
-        if (InputIsButtonDown(InputButton_MoveRight))   MoveDirection.X += 1.0f;
-        if (InputIsButtonDown(InputButton_MoveDown))    MoveDirection.Y -= 1.0f;
-        if (InputIsButtonDown(InputButton_MoveUp))      MoveDirection.Y += 1.0f;
-
-        MoveDirection = V2NormalizeOrZero(MoveDirection);
-
-        f32 MoveFriction    = 25.0f;
-        f32 MoveForce       = 180.0f;
-
-        v2 PlayerDDP = V2Sub(
-            V2ScalarMul(MoveForce,      MoveDirection),
-            V2ScalarMul(MoveFriction,   Player->DP)
+        v2 Jitter = V2(
+            JitterStrength * RandomBilateral(&Entropy),
+            JitterStrength * RandomBilateral(&Entropy)
         );
 
-        Player->DP  = V2Add(Player->DP, V2MulScalar(PlayerDDP,  DeltaTime));
-        Player->P   = V2Add(Player->P,  V2MulScalar(Player->DP, DeltaTime));
-    }
+        Enemy->DDP = V2Add(Enemy->DDP, Jitter);
 
-    // NOTE(vak): Render bullets
+        Enemy->DP = V2Add(Enemy->DP, V2MulScalar(Enemy->DDP, DeltaTime));
+        Enemy->P = V2Add(Enemy->P, V2MulScalar(Enemy->DP, DeltaTime));
 
-    for (usize Index = 0; Index < ArrayCount(Game.Bullets); Index++)
-    {
-        bullet* Bullet = Game.Bullets + Index;
+        v4 DamagedColor = V4(1.0f, 0.3f, 0.3f, 1.0f);
+        f32 DamagedT = Enemy->DamagedFadeRemaining / Enemy->DamagedFadeTime;
+        f32 CurveT = -4.0f*Square(DamagedT) + 4.0f*DamagedT;
 
-        if (!Bullet->Alive)
-            continue;
+        v4 Color = V4Add(V4MulScalar(Enemy->Color, 1.0f-CurveT), V4MulScalar(DamagedColor, CurveT));
 
-        RenderRect(R2CenterSize(Bullet->P, Bullet->Size), Bullet->Color);
-    }
+        rect2 EnemyRect = R2CenterSize(Enemy->P, Enemy->Size);
+        v2 EnemyOutlineApron = V2Scalar(0.1f);
+        v4 EnemyOutlineColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // NOTE(vak): Render enemies
+        RenderRect(R2Expand(EnemyRect, EnemyOutlineApron), EnemyOutlineColor);
+        RenderRect(EnemyRect, Color);
 
-    for (usize Index = 0; Index < ArrayCount(Game.Enemies); Index++)
-    {
-        enemy* Enemy = Game.Enemies + Index;
+        Enemy->DamagedFadeRemaining -= DeltaTime;
+        Enemy->DamagedFadeRemaining = Maximum(0, Enemy->DamagedFadeRemaining);
 
-        if (!Enemy->Alive)
-            continue;
+        v4 HealthBarBorderColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
+        v4 HealthBarColor = V4(0.4f, 0.2f, 0.2f, 1.0f);
+        v4 HealthColor = V4(0.9f, 0.3f, 0.4f, 1.0f);
 
-        static v4 EnemyColors[EnemyKind_COUNT] =
-        {
-            [EnemyKind_Grunt]   = {.E = {0.3f, 0.4f, 0.9f, 1.0f}},
-            [EnemyKind_Mover]   = {.E = {0.9f, 0.9f, 0.2f, 1.0f}},
-            [EnemyKind_Armored] = {.E = {0.8f, 0.8f, 0.8f, 1.0f}},
-        };
+        f32 HealthBarBorderApron = 0.05f;
 
-        RenderRect(R2CenterSize(Enemy->P, Enemy->Size), EnemyColors[Enemy->Kind]);
-
-        v2 HealthBarSize = V2(0.75f, 0.1f);
+        v2 HealthBarSize = V2(0.8f, 0.1f);
 
         v2 HealthBarMin = V2(
             Enemy->P.X - 0.5f*HealthBarSize.X,
-            Enemy->P.Y + 1.0f*Enemy->Size.Y
+            Enemy->P.Y + 0.5f*Enemy->Size.Y + 2.0f*HealthBarSize.Y + HealthBarBorderApron
         );
 
-        f32 HealthPercent = Enemy->CurrentHealth / Enemy->MaxHealth;
+        v2 HealthBarMax = V2Add(HealthBarMin, HealthBarSize);
 
-        v2 HealthSize = V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y);
+        f32 HealthPercent = Enemy->Health.Varying / Enemy->MaxHealth;
 
-        RenderRect(R2MinSize(HealthBarMin, HealthBarSize),  V4(0.6f, 0.2f, 0.1f, 1.0f));
-        RenderRect(R2MinSize(HealthBarMin, HealthSize),     V4(0.9f, 0.2f, 0.1f, 1.0f));
+        v2 HealthMin = HealthBarMin;
+        v2 HealthMax = V2Add(HealthMin, V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y));
+
+        v2 HealthBarBorderMin = V2Sub(HealthBarMin, V2Scalar(HealthBarBorderApron));
+        v2 HealthBarBorderMax = V2Add(HealthBarMax, V2Scalar(HealthBarBorderApron));
+
+        RenderRect(R2MinMax(HealthBarBorderMin, HealthBarBorderMax), HealthBarBorderColor);
+        RenderRect(R2MinMax(HealthBarMin, HealthBarMax), HealthBarColor);
+        RenderRect(R2MinMax(HealthMin, HealthMax), HealthColor);
     }
 
-    // NOTE(vak): Render player
-
     {
-        RenderRect(R2CenterSize(Player->P, Player->Size), V4(1.0f, 0.8f, 0.5f, 1.0f));
+        f32 HealthMultiplier = 1.0f + 0.10f*Player.EquippedGearCounts[Gear_HealthPack];
 
-        v2 HealthBarSize = V2(0.75f, 0.1f);
+        Player.MaxHealth = Player.BaseHealth*HealthMultiplier;
+
+        UpdateSmoothF32(&Player.HealthPercent);
+
+        if (InputIsButtonDown(InputButton_Weapon1)) Player.WeaponIndex = 0;
+        if (InputIsButtonDown(InputButton_Weapon2)) Player.WeaponIndex = 1;
+        if (InputIsButtonDown(InputButton_Weapon3)) Player.WeaponIndex = 2;
+
+        if (InputIsButtonDown(InputButton_Shoot))
+            GamePlayerShoot();
+
+        v2 Direction = V2(0, 0);
+
+        Direction.X -= (f32)InputIsButtonDown(InputButton_MoveLeft);
+        Direction.X += (f32)InputIsButtonDown(InputButton_MoveRight);
+        Direction.Y -= (f32)InputIsButtonDown(InputButton_MoveDown);
+        Direction.Y += (f32)InputIsButtonDown(InputButton_MoveUp);
+
+        Direction = V2NormalizeOrZero(Direction);
+
+        f32 Friction = 40.0f;
+        f32 Force = 310.0f;
+
+        Player.DDP = V2Sub(
+            V2ScalarMul(Force, Direction),
+            V2ScalarMul(Friction, Player.DP)
+        );
+
+        Player.DP = V2Add(Player.DP, V2MulScalar(Player.DDP, DeltaTime));
+        Player.P = V2Add(Player.P, V2MulScalar(Player.DP, DeltaTime));
+
+        rect2 PlayerRect = R2CenterSize(Player.P, Player.Size);
+        v2 PlayerOutlineApron = V2Scalar(0.1f);
+        v4 PlayerOutlineColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
+
+        v4 DamagedColor = V4(1.0f, 0.3f, 0.3f, 1.0f);
+        f32 DamagedT = Player.DamagedFadeRemaining / Player.DamagedFadeTime;
+        f32 CurveT = -4.0f*Square(DamagedT) + 4.0f*DamagedT;
+
+        v4 Color = V4Add(V4MulScalar(Player.Color, 1.0f-CurveT), V4MulScalar(DamagedColor, CurveT));
+
+        Player.DamagedFadeRemaining -= DeltaTime;
+        Player.DamagedFadeRemaining = Maximum(0, Player.DamagedFadeRemaining);
+
+        RenderRect(R2Expand(PlayerRect, PlayerOutlineApron), PlayerOutlineColor);
+        RenderRect(PlayerRect, Color);
+
+        v4 HealthBarBorderColor = V4(0.0f, 0.0f, 0.0f, 1.0f);
+        v4 HealthBarColor = V4(0.4f, 0.2f, 0.2f, 1.0f);
+        v4 HealthColor = V4(0.9f, 0.3f, 0.4f, 1.0f);
+
+        f32 HealthBarBorderApron = 0.05f;
+
+        v2 HealthBarSize = V2(1.0f, 0.1f);
 
         v2 HealthBarMin = V2(
-            Player->P.X - 0.5f*HealthBarSize.X,
-            Player->P.Y + 1.0f*Player->Size.Y
+            Player.P.X - 0.5f*HealthBarSize.X,
+            Player.P.Y + 0.5f*Player.Size.Y + 2.0f*HealthBarSize.Y + HealthBarBorderApron
         );
 
-        f32 HealthPercent = Player->CurrentHealth / Player->MaxHealth;
+        v2 HealthBarMax = V2Add(HealthBarMin, HealthBarSize);
 
-        v2 HealthSize = V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y);
+        f32 HealthPercent = Player.HealthPercent.Varying;
 
-        RenderRect(R2MinSize(HealthBarMin, HealthBarSize),  V4(0.4f, 0.4f, 0.6f, 1.0f));
-        RenderRect(R2MinSize(HealthBarMin, HealthSize),     V4(0.2f, 0.5f, 0.9f, 1.0f));
+        v2 HealthMin = HealthBarMin;
+        v2 HealthMax = V2Add(HealthMin, V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y));
+
+        v2 HealthBarBorderMin = V2Sub(HealthBarMin, V2Scalar(HealthBarBorderApron));
+        v2 HealthBarBorderMax = V2Add(HealthBarMax, V2Scalar(HealthBarBorderApron));
+
+        RenderRect(R2MinMax(HealthBarBorderMin, HealthBarBorderMax), HealthBarBorderColor);
+        RenderRect(R2MinMax(HealthBarMin, HealthBarMax), HealthBarColor);
+        RenderRect(R2MinMax(HealthMin, HealthMax), HealthColor);
     }
 
-    // NOTE(vak): Render particles
+    RenderOrthographic2D(R2MinMax(
+        V2(0.0f, (f32)Height),
+        V2((f32)Width, 0.0f)
+    ));
 
-    for (usize Index = 0; Index < ArrayCount(Game.Particles); Index++)
+    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
     {
-        particle* Particle = Game.Particles + Index;
+        damage_text* DamageText = DamageTexts + Index;
+        if (DamageText->TimeRemaining <= 0.0f) continue;
 
-        if (Particle->Remaining <= 0.0f)
-            continue;
+        v2 ScreenP = ConvertWorldToScreenP(DamageText->P);
+        ScreenP.Y = (f32)Camera.WindowHeight - ScreenP.Y;
 
-        v4 AlphaScale = V4(1.0f, 1.0f, 1.0f, Particle->Remaining / Particle->Lifetime);
-        v4 Color = V4Mul(Particle->Color, AlphaScale);
+        char Buffer[64] = {0};
+        usize IntegerPart = (usize)DamageText->Value;
+        f32 DecimalPart = DamageText->Value - IntegerPart;
 
-        RenderRect(R2MinSize(Particle->P, Particle->Size), Color);
+        u32 Count = 0;
+
+        do
+        {
+            Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+            IntegerPart /= 10;
+        } while (IntegerPart);
+
+        for (u32 Index = 0; Index < Count/2; Index++)
+        {
+            char Temp = Buffer[Index];
+            Buffer[Index] = Buffer[Count - Index - 1];
+            Buffer[Count - Index - 1] = Temp;
+        }
+
+        Buffer[Count++] = '.';
+        Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+        f32 Alpha = DamageText->TimeRemaining / DamageText->TotalTime;
+        v4 Tint = V4(1, 1, 1, Alpha);
+
+        RenderText(StrData(Buffer, Count), ScreenP, V4Mul(DamageText->Color, Tint));
     }
 
-    // NOTE(vak): Test text rendering
-
+    if (StageFadeRemaining > 0.0f)
     {
-        RenderOrthographic2D(R2MinMax(
-            V2(0.0f, (f32)Height),
-            V2((f32)Width, 0.0f)
-        ));
+        v2 P = V2(0.5f*Camera.WindowWidth, 0.75f*Camera.WindowHeight);
+        P.Y = Camera.WindowHeight - P.Y;
 
-        v4 Colors[4] =
+        f32 T = StageFadeRemaining / StageFadeTime;
+        f32 Alpha = 0.0f;
+
+        if (T <= 0.10f)
+            Alpha = Square(10.0f*T);
+        else if (T <= 0.90f)
+            Alpha = 1.0f;
+        else
+            Alpha = Square(10.0f - 10.0f*T);
+
+        char Buffer[64];
+
         {
-            {.E = {1.0f, 1.0f, 1.0f, 1.0f}},
-            {.E = {1.0f, 0.0f, 0.0f, 1.0f}},
-            {.E = {0.0f, 1.0f, 0.0f, 1.0f}},
-            {.E = {0.0f, 0.0f, 1.0f, 1.0f}},
-        };
+            u32 Count = sizeof("STAGE ") - 1;
 
-        v2 Position = V2(0, 0);
-        string Text = Str("The quick brown fox jumps over the lazy dog.");
+            memcpy(Buffer, "STAGE ", sizeof("STAGE ") - 1);
 
-        for (usize Index = 0; Index < ArrayCount(Colors); Index++)
-        {
-            RenderText(Text, Position, Colors[Index]);
+            u32 DigitCount = 0;
 
-            Position.Y += RenderGetTextSizeY(Text);
+            u32 Value = Stage;
+            do
+            {
+                Buffer[Count + DigitCount++] = '0' + (char)(Value % 10);
+                Value /= 10;
+            } while (Value);
+
+            for (u32 Index = 0; Index < DigitCount/2; Index++)
+            {
+                char Temp = Buffer[Count + Index];
+                Buffer[Count + Index] = Buffer[Count + DigitCount - Index - 1];
+                Buffer[Count + DigitCount - Index - 1] = Temp;
+            }
+
+            Count += DigitCount;
+
+            string StageText = StrData(Buffer, Count);
+
+            RenderTextCentered(StageText, P, V4(0.9f, 0.9f, 0.9f, Alpha));
+            P.Y += RenderGetLineHeight();
         }
 
         {
-            char BufferTextFPS[64] = {0};
-            usize CountTextFPS = snprintf(BufferTextFPS, sizeof(BufferTextFPS), "FPS: %f", 1.0f/DeltaTime);
+            u32 Count = sizeof("+") - 1;
 
-            string TextFPS = StrData(BufferTextFPS, CountTextFPS);
+            memcpy(Buffer, "+", sizeof("+") - 1);
 
-            RenderText(TextFPS, Position, V4(1.0f, 1.0f, 1.0f, 1.0f));
-            Position.Y += RenderGetTextSizeY(TextFPS);
+            u32 DigitCount = 0;
+
+            u32 Value = GameGetStageRewardMoney();
+            do
+            {
+                Buffer[Count + DigitCount++] = '0' + (char)(Value % 10);
+                Value /= 10;
+            } while (Value);
+
+            for (u32 Index = 0; Index < DigitCount/2; Index++)
+            {
+                char Temp = Buffer[Count + Index];
+                Buffer[Count + Index] = Buffer[Count + DigitCount - Index - 1];
+                Buffer[Count + DigitCount - Index - 1] = Temp;
+            }
+
+            Count += DigitCount;
+
+            memcpy(Buffer + Count, " Money", sizeof(" Money") - 1);
+            Count += sizeof(" money") - 1;
+
+            string RewardText = StrData(Buffer, Count);
+
+            RenderTextCentered(RewardText, P, V4(0.9f, 0.9f, 0.6f, Alpha));
+            P.Y += RenderGetLineHeight();
+        }
+
+        StageFadeRemaining -= DeltaTime;
+        StageFadeRemaining = Maximum(0, StageFadeRemaining);
+    }
+
+    {
+        v2 Pad = V2(16, 16);
+        v2 P = Pad;
+
+        {
+            char Buffer[64] = {0};
+
+            u32 Count = 0;
+
+            usize Value = Stage;
+            do
+            {
+                Buffer[Count++] = '0' + (char)(Value % 10);
+                Value /= 10;
+            } while (Value);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            string StageText = StrData(Buffer, Count);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("Stage: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            Caret = RenderText(StageText, Caret, V4(0.6f, 0.9f, 0.6f, 1.0f));
+            P.Y += RenderGetLineHeight();
         }
 
         {
-            char BufferTextStage[64] = {0};
-            usize CountTextStage = snprintf(BufferTextStage, sizeof(BufferTextStage), "Stage: %u", Game.Stage);
+            f32 Value = CurrentMoney.Varying;
+            usize IntegerPart = (usize)Value;
+            f32 DecimalPart = Value - IntegerPart;
 
-            string TextStage = StrData(BufferTextStage, CountTextStage);
+            char Buffer[64];
+            u32 Count = 0;
 
-            RenderText(TextStage, Position, V4(1.0f, 1.0f, 1.0f, 1.0f));
-            Position.Y += RenderGetTextSizeY(TextStage);
+            do
+            {
+                Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                IntegerPart /= 10;
+            } while (IntegerPart);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            Buffer[Count++] = '.';
+            Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+            string MoneyText = StrData(Buffer, Count);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("Money: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            Caret = RenderText(MoneyText, Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            P.Y += RenderGetLineHeight();
+        }
+
+        {
+            char Buffer[64] = {0};
+
+            v2 Caret = P;
+            Caret = RenderText(Str("Health: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+
+            {
+                f32 Health = Player.HealthPercent.Varying * Player.MaxHealth;
+                usize IntegerPart = (usize)Health;
+                f32 DecimalPart = Health - IntegerPart;
+
+                u32 Count = 0;
+
+                do
+                {
+                    Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                    IntegerPart /= 10;
+                } while (IntegerPart);
+
+                for (u32 Index = 0; Index < Count/2; Index++)
+                {
+                    char Temp = Buffer[Index];
+                    Buffer[Index] = Buffer[Count - Index - 1];
+                    Buffer[Count - Index - 1] = Temp;
+                }
+
+                Buffer[Count++] = '.';
+                Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+                string HealthText = StrData(Buffer, Count);
+
+                Caret = RenderText(HealthText, Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+            }
+
+            Caret = RenderText(Str(" / "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+
+            {
+                usize IntegerPart = (usize)Player.MaxHealth;
+                f32 DecimalPart = Player.MaxHealth - IntegerPart;
+
+                u32 Count = 0;
+
+                do
+                {
+                    Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                    IntegerPart /= 10;
+                } while (IntegerPart);
+
+                for (u32 Index = 0; Index < Count/2; Index++)
+                {
+                    char Temp = Buffer[Index];
+                    Buffer[Index] = Buffer[Count - Index - 1];
+                    Buffer[Count - Index - 1] = Temp;
+                }
+
+                Buffer[Count++] = '.';
+                Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+                string HealthText = StrData(Buffer, Count);
+
+                Caret = RenderText(HealthText, Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+            }
+
+            P.Y += RenderGetLineHeight();
+        }
+
+        {
+            RenderText(Str("Weapons: "), P, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            P.Y += RenderGetLineHeight();
+
+            for (usize Index = 0; Index < ArrayCount(Player.WeaponSlots); Index++)
+            {
+                char Buffer[] = "[ ] ";
+                Buffer[1] = '0' + (char)((Index + 1) % 10);
+
+                v4 Color = V4(0.9f, 0.9f, 0.9f, 1.0f);
+
+                if (Index == Player.WeaponIndex)
+                    Color = V4(0.4f, 0.6f, 0.9f, 1.0f);
+
+                v2 Caret = P;
+                Caret = RenderText(Str("    "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+                Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+                Caret = RenderText(Player.WeaponSlots[Index].Name, Caret, Color);
+
+                if (Index == Player.WeaponIndex)
+                    Caret = RenderText(Str(" <- "), Caret, V4(0.9f, 0.5f, 0.4f, 1.0f));
+
+                P.Y += RenderGetLineHeight();
+            }
+        }
+
+        {
+            RenderText(Str("Gears:\n"), P, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            P.Y += RenderGetLineHeight();
+
+            for (gear Gear = 0; Gear < Gear_COUNT; Gear++)
+            {
+                if (Player.EquippedGearCounts[Gear] == 0)
+                    continue;
+
+                char Buffer[64];
+                u32 Count = 0;
+
+                usize Value = Player.EquippedGearCounts[Gear];
+                do
+                {
+                    Buffer[Count++] = '0' + (char)(Value % 10);
+                    Value /= 10;
+                } while (Value);
+
+                for (u32 Index = 0; Index < Count/2; Index++)
+                {
+                    char Temp = Buffer[Index];
+                    Buffer[Index] = Buffer[Count - Index - 1];
+                    Buffer[Count - Index - 1] = Temp;
+                }
+
+                Buffer[Count++] = 'x';
+
+                v2 Caret = P;
+                Caret = RenderText(Str("    "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+                Caret = RenderText(StrData(Buffer, Count), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
+                Caret = RenderText(Str(" - "), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
+                Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+
+                P.Y += RenderGetLineHeight();
+            }
+        }
+
+        P.Y = Camera.WindowHeight - (2 + Gear_COUNT)*RenderGetLineHeight();
+        
+        {
+            RenderText(Str("Shop:"), P, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            P.Y += RenderGetLineHeight();
+        }
+
+        if (InputIsButtonPressed(InputButton_Prev))
+        {
+            if (ShopSelectingGear == 0) ShopSelectingGear = Gear_COUNT - 1;
+            else                        ShopSelectingGear -= 1;
+        }
+
+        if (InputIsButtonPressed(InputButton_Next))
+        {
+            if (ShopSelectingGear == Gear_COUNT-1)  ShopSelectingGear = 0;
+            else                                    ShopSelectingGear += 1;
+        }
+
+        for (gear Gear = 0; Gear < Gear_COUNT; Gear++)
+        {
+            f32 PriceMultiplier = 1.0f;
+            for (u32 Index = 0; Index < Player.EquippedGearCounts[Gear]; Index++)
+                PriceMultiplier *= 1.5f;
+
+            char Buffer[64];
+            u32 Count = 0;
+
+            f32 Price = PriceMultiplier * GearInfos[Gear].BasePrice;
+
+            if (InputIsButtonPressed(InputButton_Buy))
+            {
+                if ((ShopSelectingGear == Gear) && (CurrentMoney.Now >= Price))
+                {
+                    Player.EquippedGearCounts[Gear]++;
+                    SetSmoothF32(&CurrentMoney, CurrentMoney.Now - Price);
+                }
+            }
+
+            usize IntegerPart = (usize)Price;
+            f32 DecimalPart = Price - IntegerPart;
+
+            do
+            {
+                Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                IntegerPart /= 10;
+            } while (IntegerPart);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            Buffer[Count++] = '.';
+            Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("    $"), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            Caret = RenderText(StrData(Buffer, Count), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            Caret = RenderText(Str(" - "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+
+            if (ShopSelectingGear == Gear)
+            {
+                Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.8f, 0.6f, 1.0f));
+                Caret = RenderText(Str(" <- "), Caret, V4(0.9f, 0.8f, 0.6f, 1.0f));
+            }
+            else
+            {
+                Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            }
+
+            P.Y += RenderGetLineHeight();
         }
     }
 }
-
-#endif
 

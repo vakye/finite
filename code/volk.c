@@ -21,8 +21,6 @@
 #	include <stdlib.h>
 #endif
 
-#include <string.h>
-
 #ifdef _WIN32
 #ifdef __cplusplus
 extern "C" {
