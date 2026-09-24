@@ -1349,7 +1349,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
                 v2 Caret = P;
                 Caret = RenderText(Str("    "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
-                Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
+                Caret = RenderText(StrData(Buffer, Count), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
                 Caret = RenderText(Str(" - "), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
                 Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
 
@@ -1417,7 +1417,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
             v2 Caret = P;
             Caret = RenderText(Str("    $"), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
-            Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            Caret = RenderText(StrData(Buffer, Count), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
             Caret = RenderText(Str(" - "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
 
             if (ShopSelectingGear == Gear)
