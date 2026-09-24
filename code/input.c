@@ -16,8 +16,9 @@ typedef enum
     InputButton_Weapon2,
     InputButton_Weapon3,
 
-    InputButton_PrevWeapon,
-    InputButton_NextWeapon,
+    InputButton_Prev,
+    InputButton_Next,
+    InputButton_Buy,
 
     InputButton_COUNT,
 } input_button;

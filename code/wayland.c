@@ -289,8 +289,9 @@ static void WaylandKeyboardKey(
         case XKB_KEY_2:                     InputReportButton(InputButton_Weapon2,      IsDown);    break;
         case XKB_KEY_3:                     InputReportButton(InputButton_Weapon3,      IsDown);    break;
 
-        case XKB_KEY_q:                     InputReportButton(InputButton_PrevWeapon,   IsDown);    break;
-        case XKB_KEY_e:                     InputReportButton(InputButton_NextWeapon,   IsDown);    break;
+        case XKB_KEY_q:                     InputReportButton(InputButton_Prev,         IsDown);    break;
+        case XKB_KEY_e:                     InputReportButton(InputButton_Next,         IsDown);    break;
+        case XKB_KEY_f:                     InputReportButton(InputButton_Buy,          IsDown);    break;
 
         case XKB_KEY_w: case XKB_KEY_Up:    InputReportButton(InputButton_MoveUp,       IsDown);    break;
         case XKB_KEY_a: case XKB_KEY_Left:  InputReportButton(InputButton_MoveLeft,     IsDown);    break;

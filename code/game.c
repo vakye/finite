@@ -1,4 +1,6 @@
 
+#include <stdio.h>
+
 #pragma once
 
 // NOTE(vak): Cheatsheet
@@ -35,23 +37,23 @@ typedef struct
 typedef struct
 {
     string  Name;
-    u32     MaxStack;
+    f32     BasePrice;
 } gear_info;
 
 typedef enum
 {
-    Gear_HealthPack,        // NOTE(vak): +5% Health Multiplier for each pack (max stack 5)
-    Gear_FireRatePack,      // NOTE(vak): +5% Fire rate multiplier for each pack (max stack 5)
-    Gear_DamagePack,        // NOTE(vak): +5% Damage Multiplier for each pack (max stack 5)
+    Gear_HealthPack,        // NOTE(vak): +10% Health Multiplier for each pack (max stack 5)
+    Gear_FireRatePack,      // NOTE(vak): +10% Fire rate multiplier for each pack (max stack 5)
+    Gear_DamagePack,        // NOTE(vak): +10% Damage Multiplier for each pack (max stack 5)
 
     Gear_COUNT,
 } gear;
 
 static gear_info GearInfos[Gear_COUNT] =
 {
-    [Gear_HealthPack]       = {StaticStr("Health Pack"),        5},
-    [Gear_FireRatePack]     = {StaticStr("Fire Rate Pack"),     5},
-    [Gear_DamagePack]       = {StaticStr("Damage Pack"),        5},
+    [Gear_HealthPack]       = {StaticStr("Health Pack"),        5.0f},
+    [Gear_FireRatePack]     = {StaticStr("Fire Rate Pack"),     5.0f},
+    [Gear_DamagePack]       = {StaticStr("Damage Pack"),        5.0f},
 };
 
 typedef struct
@@ -92,8 +94,7 @@ typedef struct
     u32 WeaponIndex;
     weapon WeaponSlots[3];
 
-    f32 LastHealthT;
-    f32 HealthT;
+    smooth_f32 HealthPercent;
     f32 MaxHealth;
     f32 BaseHealth;
 
@@ -127,8 +128,7 @@ typedef struct
     timer* ShootTimer;
     f32 ShootCooldown;
 
-    f32 LastHealth;
-    f32 Health;
+    smooth_f32 Health;
     f32 MaxHealth;
 
     f32 DamagedFadeRemaining;
@@ -148,7 +148,8 @@ typedef struct
 
 static random_state Entropy = {0};
 static u32 Stage = 0;
-static usize CurrentMoney = 0;
+static gear ShopSelectingGear = 0;
+static smooth_f32 CurrentMoney = {0};
 static f32 StageFadeRemaining = 0.0f;
 static f32 StageFadeTime = 0.0f;
 static camera Camera = {0};
@@ -308,8 +309,7 @@ static void GameSpawnEnemy(void)
     Enemy->ShootTimer->SecondsRemaining = Enemy->ShootCooldown * RandomUnilateral(&Entropy);
 
     Enemy->MaxHealth = 100.0f + 5.0f*Stage;
-    Enemy->Health = Enemy->MaxHealth;
-    Enemy->LastHealth = Enemy->MaxHealth;
+    Enemy->Health = SmoothF32(SmoothKind_Cubed, 0.35f, Enemy->MaxHealth);
 
     Enemy->DamagedFadeTime = 0.2f;
 }
@@ -322,7 +322,7 @@ static void GameSpawnPlayerBullet(v2 SpawnP, v2 Size, f32 VelocityX, f32 Acceler
 
     weapon* CurrentWeapon = Player.WeaponSlots + Player.WeaponIndex;
 
-    f32 DamageMultiplier = 1.0f + 0.05f*Player.EquippedGearCounts[Gear_DamagePack];
+    f32 DamageMultiplier = 1.0f + 0.10f*Player.EquippedGearCounts[Gear_DamagePack];
 
     f32 RandomSpread = Spread * RandomBilateral(&Entropy);
 
@@ -418,7 +418,7 @@ static void GamePlayerShoot(void)
         Particle->Color = V4(0.6f, 0.6f, 0.6f, 1.0f);
     }
 
-    f32 FireRateMultiplier = 1.0f + 0.05f*Player.EquippedGearCounts[Gear_FireRatePack];
+    f32 FireRateMultiplier = 1.0f + 0.1f*Player.EquippedGearCounts[Gear_FireRatePack];
 
     Player.ShootTimer->SecondsRemaining = CurrentWeapon->Cooldown / FireRateMultiplier;
 }
@@ -503,6 +503,15 @@ static void GameEnemyShoot(enemy* Enemy)
     Enemy->ShootTimer->SecondsRemaining = Enemy->ShootCooldown;
 }
 
+static f32 GameGetEnemyKillMoney(void)
+{
+    f32 Multiplier = 1.0f;
+    for (usize Index = 1; Index < Stage; Index++)
+        Multiplier *= 1.025f;
+
+    return 2.0f*Multiplier;
+}
+
 static void GameDoEnemyDeathParticles(enemy* Enemy)
 {
     u32 Count = 8;
@@ -535,8 +544,9 @@ static void GameBulletHitPlayer(bullet* Bullet)
 
     f32 DecrementT = Bullet->Damage / Player.MaxHealth;
 
-    Player.LastHealthT = Player.HealthT;
-    Player.HealthT -= DecrementT;
+    f32 NewHealthPercent = Player.HealthPercent.Now - DecrementT;
+    SetSmoothF32(&Player.HealthPercent, NewHealthPercent);
+
     Player.DamagedFadeRemaining = Player.DamagedFadeTime;
 
     damage_text* DamageText = GameAddDamageText();
@@ -579,11 +589,15 @@ static void GameBulletHitPlayer(bullet* Bullet)
 
 static void GameBulletHitEnemy(enemy* Enemy, bullet* Bullet)
 {
-    f32 Knockback = 0.1f;
+    if (!Enemy->Alive)
+        return;
+
+    f32 Knockback = 0.02f;
     Enemy->DP = V2Add(Enemy->DP, V2MulScalar(Bullet->DP, Knockback));
 
-    Enemy->LastHealth = Enemy->Health;
-    Enemy->Health -= Bullet->Damage;
+    f32 NewHealth = Enemy->Health.Now - Bullet->Damage;
+    SetSmoothF32(&Enemy->Health, NewHealth);
+
     Enemy->DamagedFadeRemaining = Enemy->DamagedFadeTime;
 
     damage_text* DamageText = GameAddDamageText();
@@ -621,12 +635,12 @@ static void GameBulletHitEnemy(enemy* Enemy, bullet* Bullet)
         Particle->Color = V4(1.0f, 1.0f, 1.0f, 0.8f);
     }
 
-    if (Enemy->Health <= 0.0f)
+    if (Enemy->Health.Now <= 0.0f)
     {
         GameDoEnemyDeathParticles(Enemy);
         GameRemoveEnemy(Enemy);
 
-        CurrentMoney += 1;
+        SetSmoothF32(&CurrentMoney, CurrentMoney.Now + GameGetEnemyKillMoney());
     }
 
     GameRemoveBullet(Bullet);
@@ -650,12 +664,16 @@ static b32 GameAreAllEnemiesDead(void)
 
 static usize GameGetStageRewardMoney(void)
 {
-    return 2*((Stage + 4)/5);
+    f32 Multiplier = 1.0f;
+    for (u32 Index = 0; Index < Stage; Index++)
+        Multiplier *= 1.5f;
+
+    return 5.0f*Multiplier;
 }
 
 static void GameStartNewStage(void)
 {
-    u32 EnemyCount = 3 + Stage;
+    u32 EnemyCount = 3 + 5*Stage;
     for (u32 Index = 0; Index < EnemyCount; Index++)
         GameSpawnEnemy();
 
@@ -663,7 +681,7 @@ static void GameStartNewStage(void)
     StageFadeTime = 2.75f;
     StageFadeRemaining = StageFadeTime;
 
-    CurrentMoney += GameGetStageRewardMoney();
+    SetSmoothF32(&CurrentMoney, CurrentMoney.Now + GameGetStageRewardMoney());
 }
 
 static void GameRestart(void)
@@ -691,8 +709,7 @@ static void GameRestart(void)
     Player.ShootTimer = GameAddTimer(0.0f);
     Player.BaseHealth = 150.0f;
     Player.MaxHealth = Player.BaseHealth;
-    Player.HealthT = 1.0f;
-    Player.LastHealthT = Player.HealthT;
+    Player.HealthPercent = SmoothF32(SmoothKind_Cubed, 0.35f, 1.0f);
     Player.DamagedFadeTime = 0.2f;
 
     Player.WeaponSlots[0] = WeaponRifle;
@@ -700,11 +717,7 @@ static void GameRestart(void)
     Player.WeaponSlots[2] = WeaponShotgun;
     Player.WeaponIndex = 0;
 
-    // NOTE(vak): Dev cheat! :)
-    for (gear Gear = 0; Gear < Gear_COUNT; Gear++)
-        Player.EquippedGearCounts[Gear] = GearInfos[Gear].MaxStack;
-
-    CurrentMoney = 0;
+    CurrentMoney = SmoothF32(SmoothKind_Cubed, 0.75f, 0.0f);
     Stage = 0;
     GameStartNewStage();
 }
@@ -765,10 +778,14 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
     RenderOrthographic2D(ViewRect);
 
     if (GameAreAllEnemiesDead())
+    {
         GameStartNewStage();
+    }
 
-    if (Player.HealthT <= 1e-7f)
+    if (Player.HealthPercent.Now <= 1e-7f)
         GameRestart();
+
+    UpdateSmoothF32(&CurrentMoney);
 
     for (usize Index = 0; Index < ArrayCount(Timers); Index++)
     {
@@ -879,6 +896,8 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         GameEnemyShoot(Enemy);
 
+        UpdateSmoothF32(&Enemy->Health);
+
         v2 Direction = V2NormalizeOrZero(V2Sub(Enemy->RestP, Enemy->P));
         f32 Friction = 2.5f;
         f32 Force = 10.0f;
@@ -931,9 +950,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         v2 HealthBarMax = V2Add(HealthBarMin, HealthBarSize);
 
-        f32 LastHealthPercent = Enemy->LastHealth / Enemy->MaxHealth;
-        f32 CurHealthPercent = Enemy->Health / Enemy->MaxHealth;
-        f32 HealthPercent = LastHealthPercent + (CurHealthPercent - LastHealthPercent)*Square(1.0f - DamagedT);
+        f32 HealthPercent = Enemy->Health.Varying / Enemy->MaxHealth;
 
         v2 HealthMin = HealthBarMin;
         v2 HealthMax = V2Add(HealthMin, V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y));
@@ -947,29 +964,15 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
     }
 
     {
-        f32 HealthMultiplier = 1.0f + 0.05f*Player.EquippedGearCounts[Gear_HealthPack];
+        f32 HealthMultiplier = 1.0f + 0.10f*Player.EquippedGearCounts[Gear_HealthPack];
 
         Player.MaxHealth = Player.BaseHealth*HealthMultiplier;
+
+        UpdateSmoothF32(&Player.HealthPercent);
 
         if (InputIsButtonDown(InputButton_Weapon1)) Player.WeaponIndex = 0;
         if (InputIsButtonDown(InputButton_Weapon2)) Player.WeaponIndex = 1;
         if (InputIsButtonDown(InputButton_Weapon3)) Player.WeaponIndex = 2;
-
-        if (InputIsButtonPressed(InputButton_PrevWeapon))
-        {
-            if (Player.WeaponIndex == 0)
-                Player.WeaponIndex = ArrayCount(Player.WeaponSlots) - 1;
-            else
-                Player.WeaponIndex = (Player.WeaponIndex - 1);
-        }
-
-        if (InputIsButtonPressed(InputButton_NextWeapon))
-        {
-            if (Player.WeaponIndex + 1 == ArrayCount(Player.WeaponSlots))
-                Player.WeaponIndex = (0);
-            else
-                Player.WeaponIndex = (Player.WeaponIndex + 1);
-        }
 
         if (InputIsButtonDown(InputButton_Shoot))
             GamePlayerShoot();
@@ -1025,9 +1028,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
         v2 HealthBarMax = V2Add(HealthBarMin, HealthBarSize);
 
-        f32 LastHealthPercent = Player.LastHealthT;
-        f32 CurHealthPercent = Player.HealthT;
-        f32 HealthPercent = LastHealthPercent + (CurHealthPercent - LastHealthPercent)*Square(1.0f - DamagedT);
+        f32 HealthPercent = Player.HealthPercent.Varying;
 
         v2 HealthMin = HealthBarMin;
         v2 HealthMax = V2Add(HealthMin, V2(HealthBarSize.X * HealthPercent, HealthBarSize.Y));
@@ -1195,16 +1196,18 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         }
 
         {
-            char Buffer[64] = {0};
+            f32 Value = CurrentMoney.Varying;
+            usize IntegerPart = (usize)Value;
+            f32 DecimalPart = Value - IntegerPart;
 
+            char Buffer[64];
             u32 Count = 0;
 
-            usize Value = CurrentMoney;
             do
             {
-                Buffer[Count++] = '0' + (char)(Value % 10);
-                Value /= 10;
-            } while (Value);
+                Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                IntegerPart /= 10;
+            } while (IntegerPart);
 
             for (u32 Index = 0; Index < Count/2; Index++)
             {
@@ -1212,6 +1215,9 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
                 Buffer[Index] = Buffer[Count - Index - 1];
                 Buffer[Count - Index - 1] = Temp;
             }
+
+            Buffer[Count++] = '.';
+            Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
 
             string MoneyText = StrData(Buffer, Count);
 
@@ -1228,7 +1234,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
             Caret = RenderText(Str("Health: "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
 
             {
-                f32 Health = Player.HealthT * Player.MaxHealth;
+                f32 Health = Player.HealthPercent.Varying * Player.MaxHealth;
                 usize IntegerPart = (usize)Health;
                 f32 DecimalPart = Health - IntegerPart;
 
@@ -1322,16 +1328,109 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
                 if (Player.EquippedGearCounts[Gear] == 0)
                     continue;
 
-                char Buffer[] = " x ";
-                Buffer[0] = '0' + (char)(Player.EquippedGearCounts[Gear] % 10);
+                char Buffer[64];
+                u32 Count = 0;
+
+                usize Value = Player.EquippedGearCounts[Gear];
+                do
+                {
+                    Buffer[Count++] = '0' + (char)(Value % 10);
+                    Value /= 10;
+                } while (Value);
+
+                for (u32 Index = 0; Index < Count/2; Index++)
+                {
+                    char Temp = Buffer[Index];
+                    Buffer[Index] = Buffer[Count - Index - 1];
+                    Buffer[Count - Index - 1] = Temp;
+                }
+
+                Buffer[Count++] = 'x';
 
                 v2 Caret = P;
                 Caret = RenderText(Str("    "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
                 Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
+                Caret = RenderText(Str(" - "), Caret, V4(0.7f, 0.8f, 0.9f, 1.0f));
                 Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
 
                 P.Y += RenderGetLineHeight();
             }
+        }
+
+        P.Y = Camera.WindowHeight - (2 + Gear_COUNT)*RenderGetLineHeight();
+        
+        {
+            RenderText(Str("Shop:"), P, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            P.Y += RenderGetLineHeight();
+        }
+
+        if (InputIsButtonPressed(InputButton_Prev))
+        {
+            if (ShopSelectingGear == 0) ShopSelectingGear = Gear_COUNT - 1;
+            else                        ShopSelectingGear -= 1;
+        }
+
+        if (InputIsButtonPressed(InputButton_Next))
+        {
+            if (ShopSelectingGear == Gear_COUNT-1)  ShopSelectingGear = 0;
+            else                                    ShopSelectingGear += 1;
+        }
+
+        for (gear Gear = 0; Gear < Gear_COUNT; Gear++)
+        {
+            f32 PriceMultiplier = 1.0f;
+            for (u32 Index = 0; Index < Player.EquippedGearCounts[Gear]; Index++)
+                PriceMultiplier *= 1.5f;
+
+            char Buffer[64];
+            u32 Count = 0;
+
+            f32 Price = PriceMultiplier * GearInfos[Gear].BasePrice;
+
+            if (InputIsButtonPressed(InputButton_Buy))
+            {
+                if ((ShopSelectingGear == Gear) && (CurrentMoney.Now >= Price))
+                {
+                    Player.EquippedGearCounts[Gear]++;
+                    SetSmoothF32(&CurrentMoney, CurrentMoney.Now - Price);
+                }
+            }
+
+            usize IntegerPart = (usize)Price;
+            f32 DecimalPart = Price - IntegerPart;
+
+            do
+            {
+                Buffer[Count++] = '0' + (char)(IntegerPart % 10);
+                IntegerPart /= 10;
+            } while (IntegerPart);
+
+            for (u32 Index = 0; Index < Count/2; Index++)
+            {
+                char Temp = Buffer[Index];
+                Buffer[Index] = Buffer[Count - Index - 1];
+                Buffer[Count - Index - 1] = Temp;
+            }
+
+            Buffer[Count++] = '.';
+            Buffer[Count++] = '0' + (char)(DecimalPart * 10.0f);
+
+            v2 Caret = P;
+            Caret = RenderText(Str("    $"), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            Caret = RenderText(StrData(Buffer, sizeof(Buffer) - 1), Caret, V4(0.9f, 0.9f, 0.6f, 1.0f));
+            Caret = RenderText(Str(" - "), Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+
+            if (ShopSelectingGear == Gear)
+            {
+                Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.8f, 0.6f, 1.0f));
+                Caret = RenderText(Str(" <- "), Caret, V4(0.9f, 0.8f, 0.6f, 1.0f));
+            }
+            else
+            {
+                Caret = RenderText(GearInfos[Gear].Name, Caret, V4(0.9f, 0.9f, 0.9f, 1.0f));
+            }
+
+            P.Y += RenderGetLineHeight();
         }
     }
 }

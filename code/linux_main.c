@@ -3,6 +3,7 @@
 #include "platform.c"
 #include "intrinsics.c"
 #include "random.c"
+#include "smooth.c"
 #include "math.c"
 #include "input.c"
 #include "render.c"
