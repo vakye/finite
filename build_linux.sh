@@ -17,8 +17,7 @@ OutputFile="build/finite"
 
 CompileFlags=" \
     -c \
-    -g \
-    -O0 \
+    -O2 \
     -std=gnu11 \
     -ffreestanding \
     -fpie \
