@@ -308,7 +308,7 @@ static void GameSpawnEnemy(void)
     Enemy->ShootCooldown = 3.5f;
     Enemy->ShootTimer->SecondsRemaining = Enemy->ShootCooldown * RandomUnilateral(&Entropy);
 
-    Enemy->MaxHealth = 100.0f + 5.0f*Stage;
+    Enemy->MaxHealth = 100.0f;
     Enemy->Health = SmoothF32(SmoothKind_Cubed, 0.35f, Enemy->MaxHealth);
 
     Enemy->DamagedFadeTime = 0.2f;
