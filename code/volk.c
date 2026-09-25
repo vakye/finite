@@ -215,13 +215,13 @@ void volkLoadInstanceTable(struct VolkInstanceTable* table, VkInstance instance)
 	/* vkGetDeviceProcAddr is used by volkLoadDeviceTable; for now we load this global pointer even though it might be instance-specific */
 	vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr");
 
-	memset(table, 0, sizeof(*table));
+    ZeroType(table);
 	volkGenLoadInstanceTable(table, instance, vkGetInstanceProcAddrStub);
 }
 
 void volkLoadDeviceTable(struct VolkDeviceTable* table, VkDevice device)
 {
-	memset(table, 0, sizeof(*table));
+    ZeroType(table);
 	volkGenLoadDeviceTable(table, device, vkGetDeviceProcAddrStub);
 }
 

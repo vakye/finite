@@ -1,8 +1,6 @@
 
 #pragma once
 
-#include <immintrin.h>
-
 typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
@@ -46,25 +44,20 @@ typedef u32 b32;
 #define true  (1)
 #define false (0)
 
-void* memset(void* DestInit, s32 Byte, usize Size)
+#define ZeroType(Pointer) ZeroMemory(Pointer, sizeof(*(Pointer)))
+#define ZeroArray(Pointer, Count) ZeroMemory(Pointer, sizeof(*(Pointer)) * (Count))
+
+static void ZeroMemory(void* DestInit, usize Size)
 {
     u8* Dest = (u8*)DestInit;
-
-    while (Size--)
-        *Dest++ = (u8)Byte;
-
-    return (DestInit);
+    while (Size--) *Dest++ = 0;
 }
 
-void* memcpy(void* DestInit, void* SourceInit, usize Size)
+static void CopyMemory(void* DestInit, void* SourceInit, usize Size)
 {
     u8* Dest = (u8*)DestInit;
     u8* Source = (u8*)SourceInit;
-
-    while (Size--)
-        *Dest++ = *Source++;
-
-    return (DestInit);
+    while (Size--) *Dest++ = *Source++;
 }
 
 typedef struct

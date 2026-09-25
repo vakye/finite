@@ -1353,7 +1353,7 @@ static b32 VulkanCreateBuffer(
     b32                     Mapped
 )
 {
-    memset(Buffer, 0, sizeof(vulkan_buffer));
+    ZeroType(Buffer);
 
     Buffer->Size = Size;
 
@@ -1431,7 +1431,7 @@ static b32 VulkanCreateTexture(
     u32                     Height
 )
 {
-    memset(Texture, 0, sizeof(vulkan_texture));
+    ZeroType(Texture);
 
     switch (PixelKind)
     {
@@ -1563,7 +1563,7 @@ static b32 VulkanUploadTexture(vulkan_texture* Texture, void* Pixels)
         return (false);
     }
 
-    memcpy(Vulkan.TransferBuffer.Mapping, Pixels, UploadSize);
+    CopyMemory(Vulkan.TransferBuffer.Mapping, Pixels, UploadSize);
 
     if (vkDeviceWaitIdle(Vulkan.Device))
     {

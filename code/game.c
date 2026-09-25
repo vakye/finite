@@ -169,7 +169,7 @@ static timer* GameAddTimer(f32 InitialSecondsRemaining)
         if (!Timers[Index].Alive)
         {
             Timer = Timers + Index;
-            memset(Timer, 0, sizeof(timer));
+            ZeroType(Timer);
             Timer->Alive = true;
             Timer->SecondsRemaining = InitialSecondsRemaining;
             break;
@@ -194,7 +194,7 @@ static bullet* GameAddBullet(void)
         if (!Bullets[Index].Alive)
         {
             Bullet = Bullets + Index;
-            memset(Bullet, 0, sizeof(bullet));
+            ZeroType(Bullet);
             Bullet->Alive = true;
             break;
         }
@@ -218,7 +218,7 @@ static particle* GameAddParticle(void)
         if (!Particles[Index].Alive)
         {
             Particle = Particles + Index;
-            memset(Particle, 0, sizeof(particle));
+            ZeroType(Particle);
             Particle->Alive = true;
             break;
         }
@@ -246,7 +246,7 @@ static enemy* GameAddEnemy(void)
                 return (0);
 
             Enemy = Enemies + Index;
-            memset(Enemy, 0, sizeof(enemy));
+            ZeroType(Enemy);
             Enemy->Alive = true;
             Enemy->ShootTimer = ShootTimer;
             break;
@@ -272,7 +272,7 @@ static damage_text* GameAddDamageText(void)
         if (DamageTexts[Index].TimeRemaining <= 0.0f)
         {
             DamageText = DamageTexts + Index;
-            memset(DamageText, 0, sizeof(damage_text));
+            ZeroType(DamageText);
             break;
         }
     }
@@ -698,10 +698,8 @@ static void GameRestart(void)
     for (usize Index = 0; Index < ArrayCount(Particles); Index++)
         GameRemoveParticle(Particles + Index);
 
-    for (usize Index = 0; Index < ArrayCount(DamageTexts); Index++)
-        memset(DamageTexts + Index, 0, sizeof(damage_text));
-
-    memset(&Player, 0, sizeof(player));
+    ZeroType(DamageTexts);
+    ZeroType(&Player);
 
     Player.P = V2(0.0f, -6.5f);
     Player.Size = V2(0.6f, 0.5f);
@@ -1102,7 +1100,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         {
             u32 Count = sizeof("STAGE ") - 1;
 
-            memcpy(Buffer, "STAGE ", sizeof("STAGE ") - 1);
+            CopyMemory(Buffer, "STAGE ", sizeof("STAGE ") - 1);
 
             u32 DigitCount = 0;
 
@@ -1131,7 +1129,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
         {
             u32 Count = sizeof("+") - 1;
 
-            memcpy(Buffer, "+", sizeof("+") - 1);
+            CopyMemory(Buffer, "+", sizeof("+") - 1);
 
             u32 DigitCount = 0;
 
@@ -1151,7 +1149,7 @@ static void GameUpdateAndRender(f32 DeltaTime, u32 Width, u32 Height)
 
             Count += DigitCount;
 
-            memcpy(Buffer + Count, " Money", sizeof(" Money") - 1);
+            CopyMemory(Buffer + Count, " Money", sizeof(" Money") - 1);
             Count += sizeof(" money") - 1;
 
             string RewardText = StrData(Buffer, Count);

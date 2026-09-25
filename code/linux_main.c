@@ -131,7 +131,7 @@ static string LinuxGetEnv(char* Envp[], string VariableName)
 static void LinuxGetSoundSamples(s16* SampleBuffer, usize SampleCount, usize SampleRate, usize ChannelCount)
 {
     usize BytesPerSample = sizeof(s16) * ChannelCount;
-    memset(SampleBuffer, 0, BytesPerSample * SampleCount);
+    ZeroMemory(SampleBuffer, BytesPerSample * SampleCount);
 }
 
 s32 main(s32 ArgCount, char* Args[], char* Envp[])
@@ -251,5 +251,28 @@ s32 main(s32 ArgCount, char* Args[], char* Envp[])
     WaylandShutdown();
 
     return (0);
+}
+
+// NOTE(vak): CRT stuff
+
+void* memset(void* DestInit, s32 Byte, usize Size)
+{
+    u8* Dest = (u8*)DestInit;
+
+    while (Size--)
+        *Dest++ = (u8)Byte;
+
+    return (DestInit);
+}
+
+void* memcpy(void* DestInit, void* SourceInit, usize Size)
+{
+    u8* Dest = (u8*)DestInit;
+    u8* Source = (u8*)SourceInit;
+
+    while (Size--)
+        *Dest++ = *Source++;
+
+    return (DestInit);
 }
 
