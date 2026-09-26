@@ -1,6 +1,4 @@
 
-#include <stdio.h>
-
 #pragma once
 
 // NOTE(vak): Cheatsheet

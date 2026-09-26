@@ -81,20 +81,23 @@ static void RenderRect(rect2 Rect, v4 Color)
     RenderRectTextured(Rect, Color, R2MinMax(V2(0, 0), V2(1, 1)), GameTexture_White);
 }
 
+extern void DebugLog(const char* Message);
+
 static void RenderRectTextured(rect2 Rect, v4 Color, rect2 RectUV, game_texture Texture)
 {
-    Assert(Render.RectCount < ArrayCount(Render.Rects));
+    if (Render.RectCount < ArrayCount(Render.Rects))
+    {
+        render_rect* RenderRect = Render.Rects + Render.RectCount++;
 
-    render_rect* RenderRect = Render.Rects + Render.RectCount++;
+        v2 Min = RenderTransform2D(Render.Projection, Rect.Min);
+        v2 Max = RenderTransform2D(Render.Projection, Rect.Max);
 
-    v2 Min = RenderTransform2D(Render.Projection, Rect.Min);
-    v2 Max = RenderTransform2D(Render.Projection, Rect.Max);
+        RenderRect->Rect  = R2MinMax(Min, Max);
+        RenderRect->Color = Color;
 
-    RenderRect->Rect  = R2MinMax(Min, Max);
-    RenderRect->Color = Color;
-
-    RenderRect->RectUV = RectUV;
-    RenderRect->Texture = Texture;
+        RenderRect->RectUV = RectUV;
+        RenderRect->Texture = Texture;
+    }
 }
 
 static v2 RenderText(string Text, v2 Position, v4 Color)
@@ -112,7 +115,7 @@ static v2 RenderText(string Text, v2 Position, v4 Color)
     {
         char Character = Text.Data[Index];
 
-        if ((Character >= 32) && (Character <= 126))
+        if ((Character > 32) && (Character <= 126))
         {
             u32 CellIndex = Character - 32;
             u32 CellX     = CellIndex % CellCountX;
@@ -131,6 +134,10 @@ static v2 RenderText(string Text, v2 Position, v4 Color)
 
             RenderRectTextured(R2MinMax(Min, Max), Color, R2MinMax(MinUV, MaxUV), Texture);
 
+            CursorP.X += GlyphSize.X;
+        }
+        else if (Character == ' ')
+        {
             CursorP.X += GlyphSize.X;
         }
         else if (Character == '\t')

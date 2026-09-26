@@ -1,8 +1,6 @@
 
 #pragma once
 
-#include <immintrin.h>
-
 static u32 RotateRight32(u32 Value, u32 Shift)
 {
 	u32 Result = (Value >> Shift) | (Value << (-Shift & 31));
@@ -45,7 +43,7 @@ static f32 SquareRoot(f32 X)
     ssize SqrtExponent  = Exponent / 2;
     float Multiplier    = (Exponent & 1) ? (1.4142135623730950488f) : (1.0f);
 
-    // NOTE(vak): Extract mantissa and perform three four of the Newton method
+    // NOTE(vak): Extract mantissa and perform four of the Newton method
 
     Value.U32 &= ~(0xFF << 23);
     Value.U32 |=  (127  << 23);
@@ -57,7 +55,7 @@ static f32 SquareRoot(f32 X)
     SqrtMantissa = 0.5f * (SqrtMantissa + (Value.F32 / SqrtMantissa));
     SqrtMantissa = 0.5f * (SqrtMantissa + (Value.F32 / SqrtMantissa));
 
-    // NOTE(vak): Reconstruct result from SqrtExponent and SqrtMantissa
+    // NOTE(vak): Construct result from SqrtExponent and SqrtMantissa
 
     union
     {
